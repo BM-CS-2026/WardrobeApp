@@ -4,14 +4,20 @@ import { CATEGORIES } from './utils.js';
 const MAX_RESULTS = 8;
 const TOP_PER_CATEGORY = 5;
 
+// seedItem can be a single item OR an array of items
 export function generateOutfits(allItems, palette, seedItem = null) {
   const paletteColors = palette.colors;
   if (!paletteColors.length) return [];
 
-  // Partition by category, exclude seed
+  // Normalize seeds to array
+  const seeds = seedItem ? (Array.isArray(seedItem) ? seedItem : [seedItem]) : [];
+  const seedIds = new Set(seeds.map(s => s.id));
+  const seedCats = new Set(seeds.map(s => s.category));
+
+  // Partition by category, exclude seeds
   const buckets = {};
   for (const item of allItems) {
-    if (seedItem && item.id === seedItem.id) continue;
+    if (seedIds.has(item.id)) continue;
     if (!buckets[item.category]) buckets[item.category] = [];
     buckets[item.category].push(item);
   }
@@ -22,12 +28,11 @@ export function generateOutfits(allItems, palette, seedItem = null) {
     buckets[cat] = buckets[cat].slice(0, TOP_PER_CATEGORY);
   }
 
-  // Determine required/optional slots (excluding seed's category if present)
-  const seedCat = seedItem ? seedItem.category : null;
-  const required = CATEGORIES.filter(c => c.required && c.id !== seedCat);
-  const optional = CATEGORIES.filter(c => !c.required && c.id !== seedCat);
+  // Determine required/optional slots (excluding seed categories)
+  const required = CATEGORIES.filter(c => c.required && !seedCats.has(c.id));
+  const optional = CATEGORIES.filter(c => !c.required && !seedCats.has(c.id));
 
-  // Build slot arrays
+  // Build slot arrays — for belt, put items first (before null) to favor inclusion
   const slots = [];
   for (const cat of required) {
     const items = buckets[cat.id] || [];
@@ -35,8 +40,13 @@ export function generateOutfits(allItems, palette, seedItem = null) {
     slots.push(items);
   }
   for (const cat of optional) {
-    const items = buckets[cat.id] || [];
-    slots.push([null, ...items]); // null = skip this slot
+    const catItems = buckets[cat.id] || [];
+    if (cat.id === 'belt' && catItems.length > 0) {
+      // Favor belts: put items first so they're more likely picked before null
+      slots.push([...catItems, null]);
+    } else {
+      slots.push([null, ...catItems]);
+    }
   }
 
   // Cartesian product (capped to prevent explosion)
@@ -55,7 +65,7 @@ export function generateOutfits(allItems, palette, seedItem = null) {
 
   // Score each
   const candidates = combos.map(combo => {
-    const items = seedItem ? [seedItem, ...combo.filter(Boolean)] : combo.filter(Boolean);
+    const items = seeds.length ? [...seeds, ...combo.filter(Boolean)] : combo.filter(Boolean);
     if (!items.length) return null;
 
     const cs = colorScore(items, paletteColors);

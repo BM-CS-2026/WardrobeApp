@@ -21,16 +21,16 @@ IMPORTANT RULES:
 
 For each item provide:
 - category: one of "shirt", "pants", "shoes", "belt", "jacket"
-- description: brief description (color, material, style — e.g. "navy blue slim-fit chinos")
+- description: DETAILED description including: exact color (be very specific — e.g. "charcoal" not just "gray", "burgundy" not just "red"), material/fabric (cotton, wool, linen, suede, leather, denim, polyester, knit, etc.), texture (ribbed, smooth, woven, matte, glossy), fit (slim, relaxed, straight-leg, oversized), and any unique features (buttons, zipper, collar style, pattern, stitching, buckle type)
 - boundingBox: normalized coordinates (0-1) as {x, y, width, height} — this MUST tightly crop just this garment
 
 Respond ONLY with a JSON array, no other text.
 
 Example for a full outfit:
 [
-  {"category":"shirt","description":"white cotton crew-neck t-shirt","boundingBox":{"x":0.15,"y":0.1,"width":0.7,"height":0.3}},
-  {"category":"pants","description":"dark blue slim-fit jeans","boundingBox":{"x":0.2,"y":0.4,"width":0.6,"height":0.35}},
-  {"category":"shoes","description":"white leather sneakers","boundingBox":{"x":0.2,"y":0.78,"width":0.6,"height":0.18}}
+  {"category":"shirt","description":"light blue Oxford cotton button-down shirt with spread collar and chest pocket, slim fit","boundingBox":{"x":0.15,"y":0.1,"width":0.7,"height":0.3}},
+  {"category":"pants","description":"charcoal gray wool flat-front dress trousers with pressed crease, straight-leg fit","boundingBox":{"x":0.2,"y":0.4,"width":0.6,"height":0.35}},
+  {"category":"shoes","description":"tan suede double monk strap shoes with brass buckles and leather sole","boundingBox":{"x":0.2,"y":0.78,"width":0.6,"height":0.18}}
 ]`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -82,11 +82,18 @@ Example for a full outfit:
   });
 }
 
+// itemDescriptions can be strings OR objects { name, color } for better accuracy
 export async function generateOutfitImage(itemDescriptions, apiKey) {
   if (!apiKey) throw new Error('OpenAI API key not set.');
 
-  const itemList = itemDescriptions.join(', ');
-  const prompt = `Ultra-realistic professional fashion photograph of an athletic male model (mid-20s, clean-shaven, athletic build) wearing exactly this outfit: ${itemList}. Full body shot from head to toe, standing pose, neutral light gray studio background. Shot on Canon EOS R5 with 85mm lens, soft natural studio lighting, fashion editorial magazine quality. Hyper-realistic skin textures, natural fabric draping and creasing. No text, no watermarks, no logos.`;
+  const itemList = itemDescriptions.map(d => {
+    if (typeof d === 'object' && d.color) {
+      return `${d.name} (exact color: hsl ${Math.round(d.color.hue)}°, ${Math.round(d.color.saturation * 100)}% saturation, ${Math.round(d.color.lightness * 100)}% lightness)`;
+    }
+    return typeof d === 'object' ? d.name : d;
+  }).join('; ');
+
+  const prompt = `Ultra-realistic professional fashion editorial photo. An athletic male model (mid-20s, clean-shaven) wearing EXACTLY these items — match each color and material precisely, do not substitute or change any item: ${itemList}. Full body standing pose, neutral light gray studio background. The clothing colors, textures, and styles must match the descriptions exactly. Studio lighting, sharp detail on fabric weave and texture. No text, no watermarks.`;
 
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',

@@ -9,7 +9,10 @@
   <title>Wardrobe</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/styles.css?v=9">
+  <link rel="stylesheet" href="css/styles.css?v=20a">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <script>
     // Show any JS errors as visible alerts
     window.onerror = function(msg, src, line) {
@@ -30,6 +33,17 @@
   </script>
 </head>
 <body>
+  <!-- Global top bar — always visible -->
+  <div class="global-top-bar">
+    <button id="home-btn" onclick="window.app && app.goHome()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+      <span>Home</span>
+    </button>
+  </div>
+
   <!-- App content area -->
   <div class="app-content">
     <!-- Wardrobe Tab -->
@@ -113,6 +127,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=9"></script>
+  <script type="module" src="js/app.js?v=20a"></script>
 </body>
 </html>

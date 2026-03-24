@@ -1,9 +1,9 @@
-import * as db from './db.js?v=9';
-import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=9';
-import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=9';
-import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=9';
-import { analyzeOutfitPhoto, generateOutfitImage } from './cloud-ai.js?v=9';
-import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES, VIBES } from './utils.js?v=9';
+import * as db from './db.js?v=20';
+import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=20';
+import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=20';
+import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=20';
+import { analyzeOutfitPhoto, generateOutfitImage } from './cloud-ai.js?v=20';
+import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES, VIBES } from './utils.js?v=20';
 
 // ── State ──
 let currentTab = 'wardrobe';
@@ -60,7 +60,7 @@ async function triggerOutfitImageGeneration(outfitItems, cardElement, outfitObj)
       removeCardLoadingState(cardElement);
       return;
     }
-    const descriptions = outfitItems.map(i => i.name);
+    const descriptions = outfitItems.map(i => ({ name: i.name, color: i.colorProfile?.dominantColor }));
     const blob = await generateOutfitImage(descriptions, apiKey);
     await db.saveImage(cacheKey, blob);
     replaceCollageWithAiImage(cardElement, blob);
@@ -77,21 +77,29 @@ async function triggerOutfitImageGeneration(outfitItems, cardElement, outfitObj)
 }
 
 function replaceCollageWithAiImage(cardElement, blob) {
-  const collage = cardElement.querySelector('.outfit-collage');
-  if (!collage) return;
-  const url = URL.createObjectURL(blob);
-  collage.innerHTML = `<img src="${url}">`;
-  collage.classList.add('ai-generated');
+  const aiDiv = cardElement.querySelector('.outfit-card-ai');
+  if (aiDiv) {
+    // New wide card layout: put AI image in the dedicated AI column
+    const url = URL.createObjectURL(blob);
+    aiDiv.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm)">`;
+  } else {
+    // Fallback for old card layout
+    const collage = cardElement.querySelector('.outfit-collage');
+    if (!collage) return;
+    const url = URL.createObjectURL(blob);
+    collage.innerHTML = `<img src="${url}">`;
+    collage.classList.add('ai-generated');
+  }
 }
 
 function showCardLoadingState(cardElement) {
-  const collage = cardElement.querySelector('.outfit-collage');
-  if (!collage) return;
-  collage.style.position = 'relative';
+  const target = cardElement.querySelector('.outfit-card-ai') || cardElement.querySelector('.outfit-collage');
+  if (!target) return;
+  target.style.position = 'relative';
   const overlay = document.createElement('div');
   overlay.className = 'ai-loading-overlay';
-  overlay.innerHTML = '<div class="ai-shimmer"></div><div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Generating AI image...</div>';
-  collage.appendChild(overlay);
+  overlay.innerHTML = '<div class="ai-shimmer"></div><div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Generating...</div>';
+  target.appendChild(overlay);
 }
 
 function removeCardLoadingState(cardElement) {
@@ -100,7 +108,7 @@ function removeCardLoadingState(cardElement) {
 }
 
 function showCardErrorState(cardElement, message) {
-  const collage = cardElement.querySelector('.outfit-collage');
+  const collage = cardElement.querySelector('.outfit-card-ai') || cardElement.querySelector('.outfit-collage');
   if (!collage) return;
   collage.style.position = 'relative';
   const overlay = document.createElement('div');
@@ -167,6 +175,9 @@ function renderCurrentTab() {
 // ── WARDROBE TAB (all categories, scrollable) ──
 // ══════════════════════════════════════
 
+let selectMode = false;
+let selectedItems = new Set();
+
 function renderWardrobe() {
   const view = document.getElementById('view-wardrobe');
 
@@ -180,12 +191,19 @@ function renderWardrobe() {
     <div class="view-header">
       <h1>Wardrobe</h1>
       <div style="display:flex;gap:8px">
-        ${items.length > 0 ? `<button class="btn-icon" onclick="app.deleteAllItems()" title="Delete all" style="font-size:16px">🗑️</button>` : ''}
+        ${items.length > 0 ? `<button class="btn-icon" onclick="app.toggleSelectMode()" title="Select items" style="font-size:16px;${selectMode ? 'background:var(--accent);color:white' : ''}">${selectMode ? '✕' : '☑'}</button>` : ''}
         ${items.length > 0 ? `<button class="btn-icon" onclick="app.reanalyzeAll()" title="Re-analyze items" style="font-size:16px">🔄</button>` : ''}
         <button class="btn-icon" onclick="app.startCreateOutfit()" title="Create Outfit" style="font-size:16px">✨</button>
         <button class="btn-icon" onclick="app.showAddFlow()">+</button>
       </div>
     </div>
+    ${selectMode ? `
+      <div style="display:flex;gap:8px;padding:8px 16px;background:var(--accent-light);align-items:center">
+        <span style="flex:1;font-size:13px;font-weight:600">${selectedItems.size} selected</span>
+        <button class="btn btn-sm btn-primary" onclick="app.createOutfitFromSelected()" ${selectedItems.size === 0 || selectedItems.size > 2 ? 'disabled' : ''}>Create Outfit (1-2)</button>
+        <button class="btn btn-sm btn-danger" onclick="app.deleteSelected()" ${selectedItems.size === 0 ? 'disabled' : ''}>Delete</button>
+      </div>
+    ` : ''}
     <div style="padding-bottom:24px">
       ${sections.map(section => `
         <div class="category-section">
@@ -210,10 +228,15 @@ function renderWardrobe() {
 
 function renderItemCard(item) {
   const cp = item.colorProfile;
+  const isSelected = selectedItems.has(item.id);
+  const onclick = selectMode ? `app.toggleItemSelection('${item.id}')` : `app.showItemDetail('${item.id}')`;
   return `
-    <div class="item-card" onclick="app.showItemDetail('${item.id}')">
+    <div class="item-card ${isSelected ? 'item-selected' : ''}" onclick="${onclick}">
       <div class="thumb" id="thumb-${item.id}">
         ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` : `<span>${CATEGORIES.find(c => c.id === item.category)?.icon || '👔'}</span>`}
+        ${selectMode ? `<div class="select-check ${isSelected ? 'checked' : ''}">
+          ${isSelected ? '✓' : ''}
+        </div>` : ''}
       </div>
       <div class="info">
         <div class="name">${esc(item.name)}</div>
@@ -460,6 +483,64 @@ app.generateOutfitsForChecked = async () => {
 
 app.closeSheetAndRender = () => { closeSheet(); renderWardrobe(); };
 
+app.toggleSelectMode = () => {
+  selectMode = !selectMode;
+  selectedItems.clear();
+  renderWardrobe();
+};
+
+app.toggleItemSelection = (id) => {
+  if (selectedItems.has(id)) {
+    selectedItems.delete(id);
+  } else {
+    selectedItems.add(id);
+  }
+  renderWardrobe();
+};
+
+app.deleteSelected = async () => {
+  const count = selectedItems.size;
+  if (!count) return;
+  if (!confirm(`Delete ${count} selected item${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+
+  showLoading(`Deleting ${count} items...`);
+  for (const id of selectedItems) {
+    const item = items.find(i => i.id === id);
+    if (item?.imageId) await db.deleteImage(item.imageId).catch(() => {});
+    await db.deleteItem(id);
+  }
+  items = items.filter(i => !selectedItems.has(i.id));
+  selectedItems.clear();
+  selectMode = false;
+  hideLoading();
+  renderWardrobe();
+};
+
+app.createOutfitFromSelected = () => {
+  const seedIds = [...selectedItems];
+  if (seedIds.length === 0 || seedIds.length > 2) return;
+  app._seedSelections = new Set(seedIds);
+  app._outfitGuidance = '';
+  if (seedIds.length === 1) {
+    outfitSeedItem = items.find(i => i.id === seedIds[0]);
+  } else {
+    outfitSeedItem = seedIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+  }
+  selectMode = false;
+  selectedItems.clear();
+  showOutfitStep2();
+};
+
+app.goHome = () => {
+  closeSheet();
+  closeDetail();
+  currentTab = 'wardrobe';
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'wardrobe'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-wardrobe').classList.add('active');
+  renderWardrobe();
+};
+
 app.deleteAllItems = async () => {
   if (!confirm(`Delete all ${items.length} items from your wardrobe? This cannot be undone.`)) return;
   showLoading('Deleting all items...');
@@ -660,126 +741,140 @@ async function showGeneratedOutfitsSheet(results, seedItems, vibe) {
     <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
       ${results.length} outfits generated${seedNames ? ` for: ${esc(seedNames)}` : ''}${vibeLabel ? ` — ${vibeLabel}` : ''}
     </p>
-    <div class="item-grid">
+    <div class="outfit-list">
       ${results.map((r, i) => `
-        <div class="outfit-card" onclick="app.showGenOutfitDetail(${i})">
-          <div class="outfit-collage">
-            ${r.items.slice(0, 4).map(item => `
-              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="background:var(--bg)">` :
-                `<div class="placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
-                  ${CATEGORIES.find(c => c.id === item.category)?.icon || ''}
-                </div>`}
-            `).join('')}
-            ${r.items.length < 4 ? Array(4 - Math.min(r.items.length, 4)).fill('<div class="placeholder"></div>').join('') : ''}
+        <div class="outfit-card-wide" onclick="app.showGenOutfitDetail(${i})">
+          <div class="outfit-card-row">
+            <div class="outfit-card-ai">
+              <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg);flex-direction:column;gap:6px">
+                <div class="spinner" style="width:24px;height:24px;margin:0"></div>
+                <span style="font-size:11px;color:var(--text-secondary)">Generating...</span>
+              </div>
+            </div>
+            <div class="outfit-card-items">
+              ${r.items.map(item => `
+                <div class="outfit-card-item">
+                  ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` :
+                    `<div class="outfit-card-item-placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
+                      ${CATEGORIES.find(c => c.id === item.category)?.icon || ''}
+                    </div>`}
+                  <span class="outfit-card-item-name">${esc(item.name)}</span>
+                </div>
+              `).join('')}
+            </div>
           </div>
           <div class="score-badge">
             <span class="pct ${scoreColor(r.overallScore)}">${Math.round(r.overallScore * 100)}%</span>
             <span style="color:var(--text-secondary)">${r.items.length} items</span>
           </div>
-          <div class="palette-bar" style="height:6px;border-radius:0">
-            ${r.items.filter(it => it.colorProfile).map(it => `<div style="background:${hslToCss(it.colorProfile.dominantColor)}"></div>`).join('')}
-          </div>
         </div>
       `).join('')}
     </div>
-    <button class="btn btn-secondary" style="margin-top:16px" onclick="app.closeSheetAndRender()">Close</button>
+    <div id="ai-progress-bar" style="position:sticky;bottom:0;background:var(--card);padding:10px 16px;border-top:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Generating AI images: <span id="ai-progress-text">0%</span></div>
+      <div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden">
+        <div id="ai-progress-fill" style="height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width 0.3s"></div>
+      </div>
+      <p style="font-size:11px;color:var(--text-secondary);margin-top:4px">You can close this and keep working — images will appear in Outfits tab</p>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="app.closeSheetAndRender()">Close & Continue in Background</button>
   `);
   lazyLoadImages();
 
-  // AI status banner
-  const statusBanner = document.createElement('div');
-  statusBanner.id = 'ai-status';
-  statusBanner.style.cssText = 'padding:8px 12px;background:#e8f0fe;border-radius:8px;font-size:12px;color:#1a73e8;margin-bottom:12px;text-align:center';
-  statusBanner.textContent = 'Preparing AI outfit images...';
-  const sheetContent = document.querySelector('#sheet-overlay .modal-sheet');
-  if (sheetContent) sheetContent.insertBefore(statusBanner, sheetContent.children[1]);
+  // Start background AI image generation with progress
+  generateAiImagesInBackground(results);
+}
 
-  // Progressive AI image generation
-  setTimeout(async () => {
-    const cards = document.querySelectorAll('#sheet-overlay .outfit-card');
-    const banner = document.getElementById('ai-status');
+// Background AI image generation — works even after sheet is closed
+async function generateAiImagesInBackground(results) {
+  const apiKey = await db.getApiKey();
+  if (!apiKey) return;
 
-    if (!cards.length) {
-      if (banner) banner.textContent = 'Error: No outfit cards found';
-      return;
+  const total = results.length;
+  let done = 0;
+
+  function updateProgress() {
+    const pct = Math.round((done / total) * 100);
+    // Update progress bar in sheet (if still open)
+    const fill = document.getElementById('ai-progress-fill');
+    const text = document.getElementById('ai-progress-text');
+    if (fill) fill.style.width = `${pct}%`;
+    if (text) text.textContent = `${pct}% (${done}/${total})`;
+    // Re-render Outfits tab to show new images
+    renderOutfits();
+  }
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const cacheKey = outfitImageCacheKey(r.items.map(it => it.id));
+    const cached = await db.loadImage(cacheKey);
+    if (cached) {
+      // Update outfit in memory if needed
+      const savedOutfit = outfits.find(o => outfitImageCacheKey(o.itemIds) === cacheKey);
+      if (savedOutfit && !savedOutfit.aiImageId) {
+        savedOutfit.aiImageId = cacheKey;
+        await db.putOutfit(savedOutfit);
+      }
+      done++;
+      updateProgress();
+      continue;
     }
 
-    const apiKey = await db.getApiKey();
-    if (!apiKey) {
-      if (banner) banner.textContent = 'No API key found — skipping AI image generation';
-      return;
-    }
+    try {
+      const descriptions = r.items.map(it => ({ name: it.name, color: it.colorProfile?.dominantColor }));
+      const blob = await generateOutfitImage(descriptions, apiKey);
+      await db.saveImage(cacheKey, blob);
 
-    if (banner) banner.textContent = `Generating AI images (0/${cards.length})... This takes ~15s per outfit.`;
-
-    let done = 0;
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i];
-      if (!cards[i]) continue;
-      const cacheKey = outfitImageCacheKey(r.items.map(it => it.id));
-      const cached = await db.loadImage(cacheKey);
-
-      if (cached) {
-        replaceCollageWithAiImage(cards[i], cached);
-        done++;
-        if (banner) banner.textContent = `AI images: ${done}/${results.length} done`;
-        continue;
+      // Update the saved outfit in DB
+      const savedOutfit = outfits.find(o => outfitImageCacheKey(o.itemIds) === cacheKey);
+      if (savedOutfit && !savedOutfit.aiImageId) {
+        savedOutfit.aiImageId = cacheKey;
+        await db.putOutfit(savedOutfit);
       }
 
-      showCardLoadingState(cards[i]);
-      try {
-        const descriptions = r.items.map(it => it.name);
-        const blob = await generateOutfitImage(descriptions, apiKey);
-        await db.saveImage(cacheKey, blob);
-        replaceCollageWithAiImage(cards[i], blob);
-        // Update auto-saved outfit with AI image
-        const savedOutfit = outfits.find(o => outfitImageCacheKey(o.itemIds) === cacheKey);
-        if (savedOutfit && !savedOutfit.aiImageId) {
-          savedOutfit.aiImageId = cacheKey;
-          await db.putOutfit(savedOutfit);
-        }
-        done++;
-        if (banner) banner.textContent = `AI images: ${done}/${results.length} done`;
-      } catch (err) {
-        removeCardLoadingState(cards[i]);
-        if (banner) {
-          banner.style.background = '#fce8e6';
-          banner.style.color = '#c5221f';
-          banner.textContent = `DALL-E error: ${err.message.slice(0, 100)}`;
-        }
-        break; // Stop trying if one fails (likely auth/billing issue)
-      }
+      done++;
+      updateProgress();
+    } catch (err) {
+      console.error('[AI] Background image generation failed:', err.message);
+      break;
     }
+  }
 
-    if (done === results.length && banner) {
-      banner.style.background = '#e6f4ea';
-      banner.style.color = '#137333';
-      banner.textContent = `All ${done} AI outfit images generated!`;
-      setTimeout(() => banner.remove(), 3000);
-    }
-  }, 500);
+  // Mark complete in sheet if still open
+  const bar = document.getElementById('ai-progress-bar');
+  if (bar) {
+    bar.innerHTML = `<div style="text-align:center;font-size:13px;color:var(--success);padding:4px">All ${done} AI images generated!</div>`;
+    setTimeout(() => { if (bar.parentNode) bar.remove(); }, 3000);
+  }
 }
 
 app.showGenOutfitDetail = (idx) => {
   const r = app._genResults[idx];
   if (!r) return;
+  const cacheKey = outfitImageCacheKey(r.items.map(i => i.id));
   closeSheet();
   openSheet(`
     <h2>Outfit Detail</h2>
-    ${r.items.map(item => {
-      const cat = CATEGORIES.find(c => c.id === item.category);
-      return `
-        <div class="item-row">
-          ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` :
-            `<div style="width:50px;height:50px;border-radius:8px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center">${cat?.icon || ''}</div>`}
-          <div class="item-info">
-            <div class="name">${esc(item.name)}</div>
-            <div class="cat">${cat?.name || ''}</div>
-          </div>
-          ${item.colorProfile ? `<div class="swatch" style="background:${hslToCss(item.colorProfile.dominantColor)}"></div>` : ''}
-        </div>
-      `;
-    }).join('')}
+    <div class="outfit-side-by-side">
+      <div class="outfit-side-ai">
+        <img data-ai-cache-key="${cacheKey}" class="lazy-ai-cache" style="width:100%;border-radius:var(--radius);background:var(--bg)">
+      </div>
+      <div class="outfit-side-items">
+        ${r.items.map(item => {
+          const cat = CATEGORIES.find(c => c.id === item.category);
+          return `
+            <div class="item-row" style="padding:6px 8px;margin-bottom:4px">
+              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:40px;height:40px;border-radius:6px">` :
+                `<div style="width:40px;height:40px;border-radius:6px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:14px">${cat?.icon || ''}</div>`}
+              <div class="item-info" style="min-width:0">
+                <div class="name" style="font-size:12px">${esc(item.name)}</div>
+                <div class="cat" style="font-size:10px">${cat?.name || ''}</div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
     <div class="divider"></div>
     <div class="score-row"><span class="label">Color Match</span><span class="value ${scoreColor(r.colorScore)}">${Math.round(r.colorScore * 100)}%</span></div>
     <div class="score-row"><span class="label">Completeness</span><span class="value ${scoreColor(r.completenessScore)}">${Math.round(r.completenessScore * 100)}%</span></div>
@@ -845,45 +940,54 @@ function hideLoading() {
 let outfitSeedItem = null;
 let outfitVibe = null;
 
+app._seedSelections = new Set();
+app._outfitGuidance = '';
+
 app.startCreateOutfit = () => {
+  app._seedSelections = new Set();
+  app._outfitGuidance = '';
   outfitSeedItem = null;
   outfitVibe = null;
   showOutfitStep1();
 };
 
-// Step 1: Pick an item (take new photo OR choose existing)
+// Step 1: Pick items (multi-select) + text guidance
 function showOutfitStep1() {
+  const selectedCount = app._seedSelections.size;
   openSheet(`
     <h2>Create Outfit</h2>
     <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
-      Start with an item — take a new photo or pick from your wardrobe.
+      Pick 1-2 items to build the outfit around, then add optional guidance.
     </p>
 
     <div class="choice-card" onclick="app.outfitNewPhoto()">
       <div class="icon-box">📷</div>
       <div class="text">
         <h4>New Photo</h4>
-        <p>Take a photo of an item to build an outfit around</p>
+        <p>Take a photo of an item</p>
       </div>
       <div class="chevron">›</div>
     </div>
 
     ${items.length > 0 ? `
-      <div class="section-label" style="margin-top:16px">Or pick from your wardrobe:</div>
-      <div id="pick-item-list" style="max-height:300px;overflow-y:auto">
+      <div class="section-label" style="margin-top:16px">Pick from your wardrobe (up to 2):</div>
+      <div id="pick-item-list" style="max-height:250px;overflow-y:auto">
         ${CATEGORIES.map(cat => {
           const catItems = items.filter(i => i.category === cat.id);
           if (!catItems.length) return '';
           return `
-            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin:10px 0 4px">${cat.icon} ${cat.name}s</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin:10px 0 4px">${cat.icon} ${plural(cat.name)}</div>
             ${catItems.map(item => `
-              <div class="pick-item-row" onclick="app.pickExistingItem('${item.id}')">
+              <div class="pick-item-row ${app._seedSelections.has(item.id) ? 'selected' : ''}" onclick="app.toggleSeedItem('${item.id}')">
                 ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:44px;height:44px;border-radius:8px;object-fit:cover">` :
                   `<div style="width:44px;height:44px;border-radius:8px;background:var(--border);display:flex;align-items:center;justify-content:center">${cat.icon}</div>`}
                 <div style="flex:1;min-width:0">
                   <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(item.name)}</div>
                 </div>
                 ${item.colorProfile ? `<div class="swatch" style="background:${hslToCss(item.colorProfile.dominantColor)}"></div>` : ''}
+                <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${app._seedSelections.has(item.id) ? 'var(--accent)' : 'var(--border)'};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                  ${app._seedSelections.has(item.id) ? '<span style="color:var(--accent);font-size:14px;font-weight:700">✓</span>' : ''}
+                </div>
               </div>
             `).join('')}
           `;
@@ -891,9 +995,45 @@ function showOutfitStep1() {
       </div>
     ` : ''}
 
+    <div class="divider"></div>
+    <div class="form-group">
+      <label>Guidance (optional)</label>
+      <input id="outfit-guidance" type="text" placeholder="e.g. no jeans, rainy day, formal meeting..." value="${esc(app._outfitGuidance)}" oninput="app._outfitGuidance = this.value">
+    </div>
+
+    <button class="btn btn-primary" onclick="app.goToStep2()" ${selectedCount === 0 ? 'disabled' : ''}>
+      Continue with ${selectedCount} item${selectedCount !== 1 ? 's' : ''} selected
+    </button>
+
     <input type="file" accept="image/*" capture="environment" class="file-input" id="file-outfit-new" onchange="app.handleOutfitNewPhoto(this)">
   `);
   lazyLoadImages();
+};
+
+app.toggleSeedItem = (id) => {
+  if (app._seedSelections.has(id)) {
+    app._seedSelections.delete(id);
+  } else {
+    if (app._seedSelections.size >= 2) return;
+    app._seedSelections.add(id);
+  }
+  // Save guidance before re-render
+  const guidanceEl = document.getElementById('outfit-guidance');
+  if (guidanceEl) app._outfitGuidance = guidanceEl.value;
+  showOutfitStep1();
+};
+
+app.goToStep2 = () => {
+  const guidanceEl = document.getElementById('outfit-guidance');
+  if (guidanceEl) app._outfitGuidance = guidanceEl.value;
+  const seedIds = [...app._seedSelections];
+  if (seedIds.length === 1) {
+    outfitSeedItem = items.find(i => i.id === seedIds[0]);
+  } else {
+    outfitSeedItem = seedIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+  }
+  closeSheet();
+  showOutfitStep2();
 };
 
 app.outfitNewPhoto = async () => {
@@ -975,20 +1115,23 @@ app.pickExistingItem = (id) => {
 
 // Step 2: Pick a vibe
 function showOutfitStep2() {
-  const seed = outfitSeedItem;
-  const cat = CATEGORIES.find(c => c.id === seed?.category);
+  const seeds = Array.isArray(outfitSeedItem) ? outfitSeedItem : (outfitSeedItem ? [outfitSeedItem] : []);
 
   openSheet(`
     <h2>Choose a Vibe</h2>
-    <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border-radius:10px;margin-bottom:16px">
-      ${seed?.imageId ? `<img data-image-id="${seed.imageId}" class="lazy-img" style="width:48px;height:48px;border-radius:8px;object-fit:cover">` :
-        `<div style="width:48px;height:48px;border-radius:8px;background:var(--border);display:flex;align-items:center;justify-content:center">${cat?.icon || '👔'}</div>`}
-      <div style="flex:1">
-        <div style="font-size:14px;font-weight:600">${esc(seed?.name || 'Item')}</div>
-        <div style="font-size:12px;color:var(--text-secondary)">${cat?.name || ''}</div>
-      </div>
-      ${seed?.colorProfile ? `<div class="swatch md" style="background:${hslToCss(seed.colorProfile.dominantColor)}"></div>` : ''}
-    </div>
+    ${seeds.map(seed => {
+      const cat = CATEGORIES.find(c => c.id === seed?.category);
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border-radius:10px;margin-bottom:8px">
+        ${seed?.imageId ? `<img data-image-id="${seed.imageId}" class="lazy-img" style="width:48px;height:48px;border-radius:8px;object-fit:cover">` :
+          `<div style="width:48px;height:48px;border-radius:8px;background:var(--border);display:flex;align-items:center;justify-content:center">${cat?.icon || '👔'}</div>`}
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:600">${esc(seed?.name || 'Item')}</div>
+          <div style="font-size:12px;color:var(--text-secondary)">${cat?.name || ''}</div>
+        </div>
+        ${seed?.colorProfile ? `<div class="swatch md" style="background:${hslToCss(seed.colorProfile.dominantColor)}"></div>` : ''}
+      </div>`;
+    }).join('')}
+    ${app._outfitGuidance ? `<div style="padding:8px 10px;background:var(--accent-light);border-radius:8px;font-size:12px;color:var(--accent);margin-bottom:8px">${esc(app._outfitGuidance)}</div>` : ''}
 
     <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">What's the occasion?</p>
     <div class="vibe-grid">
@@ -1021,17 +1164,32 @@ app.runVibeOutfitGen = () => {
   closeSheet();
   showLoading('Generating outfits...');
 
+  const seeds = Array.isArray(outfitSeedItem) ? outfitSeedItem : [outfitSeedItem];
+
   setTimeout(() => {
-    // Create a temporary palette from the vibe's colors
     const vibePalette = { id: 'vibe-temp', name: vibe.name, colors: vibe.colors, harmonyType: 'analogous', isBuiltIn: false };
 
-    const results = generateOutfits(items, vibePalette, outfitSeedItem);
+    // Filter items by guidance (e.g. "no jeans" removes jeans)
+    let filteredItems = items;
+    const guidance = (app._outfitGuidance || '').toLowerCase().trim();
+    if (guidance) {
+      const noMatches = guidance.match(/no\s+(\w+)/gi) || [];
+      const excludeTerms = noMatches.map(m => m.replace(/^no\s+/i, '').toLowerCase());
+      if (excludeTerms.length) {
+        filteredItems = items.filter(item => {
+          const name = item.name.toLowerCase();
+          return !excludeTerms.some(term => name.includes(term));
+        });
+      }
+    }
+
+    const results = generateOutfits(filteredItems, vibePalette, seeds);
 
     hideLoading();
 
     if (results.length > 0) {
       app._genResults = results;
-      showGeneratedOutfitsSheet(results, [outfitSeedItem], vibe);
+      showGeneratedOutfitsSheet(results, seeds, vibe);
     } else {
       openSheet(`
         <h2>No Outfits Found</h2>
@@ -1065,6 +1223,15 @@ app.showItemDetail = async (id) => {
     <div class="detail-body">
       ${imgSrc ? `<img src="${imgSrc}" class="detail-image">` : ''}
 
+      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Description (edit to correct)</div>
+        <textarea id="item-name-edit" rows="2" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit;resize:vertical">${esc(item.name)}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-sm btn-primary" style="flex:1" onclick="app.saveItemName('${item.id}')">Save Description</button>
+          <button class="btn btn-sm btn-outline" style="flex:1" onclick="app.reanalyzeItem('${item.id}')">🔄 Re-analyze with AI</button>
+        </div>
+      </div>
+
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
         <span style="padding:5px 12px;background:var(--bg);border-radius:16px;font-size:13px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''} ${CATEGORIES.find(c => c.id === item.category)?.name || ''}</span>
         <span style="margin-left:auto;font-size:12px;color:var(--text-secondary)">${new Date(item.dateAdded).toLocaleDateString()}</span>
@@ -1097,9 +1264,101 @@ app.showItemDetail = async (id) => {
       ` : ''}
 
       <button class="btn btn-primary" onclick="app.generateFromItem('${item.id}')">✨ Generate Outfits</button>
+      <button class="btn btn-outline" style="margin-top:8px" onclick="app.pickSecondItem('${item.id}')">+ Add Another Item & Generate</button>
     </div>
   `);
   lazyLoadImages();
+};
+
+app.pickSecondItem = (firstItemId) => {
+  const firstItem = items.find(i => i.id === firstItemId);
+  if (!firstItem) return;
+  const firstCat = CATEGORIES.find(c => c.id === firstItem.category);
+  const others = items.filter(i => i.id !== firstItemId);
+
+  openSheet(`
+    <h2>Pick a Second Item</h2>
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg);border-radius:10px;margin-bottom:12px">
+      ${firstItem.imageId ? `<img data-image-id="${firstItem.imageId}" class="lazy-img" style="width:44px;height:44px;border-radius:8px;object-fit:cover">` : ''}
+      <div style="flex:1;font-size:14px;font-weight:600">${esc(firstItem.name)}</div>
+      <span style="font-size:11px;color:var(--text-secondary)">${firstCat?.name || ''}</span>
+    </div>
+    <div style="max-height:350px;overflow-y:auto">
+      ${CATEGORIES.map(cat => {
+        const catItems = others.filter(i => i.category === cat.id);
+        if (!catItems.length) return '';
+        return `
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin:10px 0 4px">${cat.icon} ${plural(cat.name)}</div>
+          ${catItems.map(item => `
+            <div class="pick-item-row" onclick="app.generateFromTwoItems('${firstItemId}', '${item.id}')">
+              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:44px;height:44px;border-radius:8px;object-fit:cover">` :
+                `<div style="width:44px;height:44px;border-radius:8px;background:var(--border);display:flex;align-items:center;justify-content:center">${cat.icon}</div>`}
+              <div style="flex:1;min-width:0">
+                <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(item.name)}</div>
+              </div>
+              ${item.colorProfile ? `<div class="swatch" style="background:${hslToCss(item.colorProfile.dominantColor)}"></div>` : ''}
+            </div>
+          `).join('')}
+        `;
+      }).join('')}
+    </div>
+    <button class="btn btn-secondary" style="margin-top:12px" onclick="closeSheet()">Cancel</button>
+  `);
+  lazyLoadImages();
+};
+
+app.generateFromTwoItems = (id1, id2) => {
+  const item1 = items.find(i => i.id === id1);
+  const item2 = items.find(i => i.id === id2);
+  if (!item1 || !item2) return;
+  closeSheet();
+  closeDetail();
+  outfitSeedItem = [item1, item2];
+  app._seedSelections = new Set([id1, id2]);
+  app._outfitGuidance = '';
+  outfitVibe = null;
+  showOutfitStep2();
+};
+
+app.saveItemName = async (id) => {
+  const newName = document.getElementById('item-name-edit')?.value?.trim();
+  if (!newName) return;
+  const item = items.find(i => i.id === id);
+  if (!item) return;
+  item.name = newName;
+  await db.putItem(item);
+  app.showItemDetail(id);
+  renderWardrobe();
+};
+
+app.reanalyzeItem = async (id) => {
+  const item = items.find(i => i.id === id);
+  if (!item || !item.imageId) { alert('No image to re-analyze.'); return; }
+
+  const apiKey = await db.getApiKey();
+  if (!apiKey) { alert('Please set your OpenAI API key first.'); return; }
+
+  showLoading('Re-analyzing item with AI...');
+  try {
+    const blob = await db.loadImage(item.imageId);
+    if (!blob) { hideLoading(); alert('Image not found.'); return; }
+
+    const garments = await analyzeOutfitPhoto(blob, apiKey);
+    if (garments.length > 0) {
+      // Use the first garment's description and category
+      const g = garments[0];
+      item.name = g.description || item.name;
+      item.category = CATEGORIES.find(c => c.id === g.category) ? g.category : item.category;
+      await db.putItem(item);
+    }
+
+    hideLoading();
+    app.showItemDetail(id);
+    renderWardrobe();
+  } catch (err) {
+    hideLoading();
+    alert('Re-analysis failed: ' + err.message);
+  }
 };
 
 app.deleteItem = async (id) => {
@@ -1348,49 +1607,70 @@ function openColorPicker(color, onDone) {
 // ── OUTFITS TAB ──
 // ══════════════════════════════════════
 
+let showFavoritesOnly = false;
+
 function renderOutfits() {
   const view = document.getElementById('view-outfits');
   const saved = outfits.filter(o => o.isSaved).sort((a, b) => b.dateCreated - a.dateCreated);
+  const displayed = showFavoritesOnly ? saved.filter(o => o.favorite) : saved;
 
   view.innerHTML = `
     <div class="view-header">
       <h1>Outfits</h1>
+      <div style="display:flex;gap:8px">
+        ${saved.some(o => o.favorite) ? `<button class="btn-icon" onclick="app.toggleFavFilter()" title="Favorites" style="font-size:16px;${showFavoritesOnly ? 'background:var(--accent);color:white' : ''}">❤️</button>` : ''}
+      </div>
     </div>
-    ${saved.length === 0 ? `
+    ${displayed.length === 0 ? `
       <div class="empty-state">
-        <div class="icon">✨</div>
-        <h3>No Saved Outfits</h3>
-        <p>Generate outfits from your wardrobe items and save your favorites</p>
+        <div class="icon">${showFavoritesOnly ? '❤️' : '✨'}</div>
+        <h3>${showFavoritesOnly ? 'No Favorites Yet' : 'No Saved Outfits'}</h3>
+        <p>${showFavoritesOnly ? 'Tap the heart on outfits you love' : 'Generate outfits from your wardrobe items'}</p>
       </div>
     ` : `
-      <div class="item-grid" style="padding:12px 16px">
-        ${saved.map(o => renderOutfitCard(o)).join('')}
+      <div class="outfit-list" style="padding:12px 16px">
+        ${displayed.map(o => renderOutfitCard(o)).join('')}
       </div>
     `}
   `;
   lazyLoadImages();
 }
 
+app.toggleFavFilter = () => {
+  showFavoritesOnly = !showFavoritesOnly;
+  renderOutfits();
+};
+
 function renderOutfitCard(outfit) {
   const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
-  const hasAiImage = !!outfit.aiImageId;
+  const isFav = !!outfit.favorite;
   return `
-    <div class="outfit-card" onclick="app.showOutfitDetail('${outfit.id}')">
-      <div class="outfit-collage${hasAiImage ? ' ai-generated' : ''}">
-        ${hasAiImage
-          ? `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="background:var(--bg)">`
-          : `${oi.slice(0, 4).map(item => `
-              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="background:var(--bg)">` :
-                `<div class="placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
+    <div class="outfit-card-wide">
+      <div class="outfit-card-row" onclick="app.showOutfitDetail('${outfit.id}')">
+        <div class="outfit-card-ai">
+          ${outfit.aiImageId
+            ? `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;height:100%;object-fit:cover">`
+            : `<div style="width:100%;aspect-ratio:1;background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:12px">Generating...</div>`}
+        </div>
+        <div class="outfit-card-items">
+          ${oi.map(item => `
+            <div class="outfit-card-item">
+              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` :
+                `<div class="outfit-card-item-placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
                   ${CATEGORIES.find(c => c.id === item.category)?.icon || ''}
                 </div>`}
-            `).join('')}
-            ${oi.length < 4 ? Array(4 - Math.min(oi.length, 4)).fill('<div class="placeholder"></div>').join('') : ''}`
-        }
+              <span class="outfit-card-item-name">${esc(item.name)}</span>
+            </div>
+          `).join('')}
+        </div>
       </div>
       <div class="score-badge">
         <span class="pct ${scoreColor(outfit.overallScore)}">${Math.round(outfit.overallScore * 100)}%</span>
         <span style="color:var(--text-secondary)">${oi.length} items</span>
+        <div style="display:flex;gap:8px;margin-left:auto" onclick="event.stopPropagation()">
+          <button onclick="app.toggleFavorite('${outfit.id}')" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px">${isFav ? '❤️' : '🤍'}</button>
+          <button onclick="app.quickDeleteOutfit('${outfit.id}')" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px">🗑️</button>
+        </div>
       </div>
     </div>
   `;
@@ -1408,32 +1688,35 @@ app.showOutfitDetail = async (id) => {
       <button class="btn-icon" style="font-size:16px" onclick="app.deleteOutfit('${outfit.id}')">🗑️</button>
     </div>
     <div class="detail-body">
-      ${outfit.aiImageId ? `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;border-radius:var(--radius);margin-bottom:16px;background:var(--bg)">` : ''}
-      <div class="section-title">Items</div>
-      ${oi.map((item, idx) => `
-        <div class="item-row item-replaceable" onclick="app.showReplaceItem('${outfit.id}', ${idx})">
-          ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` : `<div style="width:50px;height:50px;border-radius:8px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center">${CATEGORIES.find(c => c.id === item.category)?.icon || ''}</div>`}
-          <div class="item-info">
-            <div class="name">${esc(item.name)}</div>
-            <div class="cat">${CATEGORIES.find(c => c.id === item.category)?.name || ''}</div>
+      ${outfit.aiImageId ?
+        `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;border-radius:var(--radius);background:var(--bg);margin-bottom:12px">` :
+        `<div style="width:100%;aspect-ratio:4/3;background:var(--bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px;margin-bottom:12px">AI image generating...</div>`}
+
+      <div class="section-title">Items (tap to replace)</div>
+      <div style="display:flex;gap:10px;overflow-x:auto;padding:4px 0 12px;scrollbar-width:none">
+        ${oi.map((item, idx) => `
+          <div style="flex-shrink:0;text-align:center;cursor:pointer" onclick="app.showReplaceItem('${outfit.id}', ${idx})">
+            ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:100px;height:100px;border-radius:8px;object-fit:cover;display:block">` : `<div style="width:100px;height:100px;border-radius:8px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:20px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''}</div>`}
+            <div style="font-size:11px;font-weight:600;margin-top:4px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.name)}</div>
+            <div style="font-size:10px;color:var(--accent)">Replace ›</div>
           </div>
-          ${item.colorProfile ? `<div class="swatch" style="background:${hslToCss(item.colorProfile.dominantColor)}"></div>` : ''}
-          <div style="font-size:11px;color:var(--accent);flex-shrink:0">Replace ›</div>
-        </div>
-      `).join('')}
+        `).join('')}
+      </div>
 
       <div class="divider"></div>
 
-      <div class="section-title">Score Breakdown</div>
+      <div class="section-title">Refine with Text</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <input id="outfit-feedback-text" type="text" placeholder="e.g. make it more casual, swap belt..." style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px">
+        <button class="btn btn-primary btn-sm" onclick="app.applyOutfitFeedback('${outfit.id}')">Apply</button>
+      </div>
+
+      <div class="section-title">Score</div>
       <div class="score-row"><span class="label">Color Match</span><span class="value ${scoreColor(outfit.colorScore)}">${Math.round(outfit.colorScore * 100)}%</span></div>
       <div class="score-row"><span class="label">Completeness</span><span class="value ${scoreColor(outfit.completenessScore)}">${Math.round(outfit.completenessScore * 100)}%</span></div>
       <div class="score-row"><span class="label">Style Harmony</span><span class="value ${scoreColor(outfit.styleScore)}">${Math.round(outfit.styleScore * 100)}%</span></div>
       <div class="divider"></div>
       <div class="score-row"><span class="label" style="font-weight:700">Overall</span><span class="value ${scoreColor(outfit.overallScore)}" style="font-weight:700">${Math.round(outfit.overallScore * 100)}%</span></div>
-
-      <div class="palette-bar" style="margin-top:16px">
-        ${oi.filter(i => i.colorProfile).map(i => `<div style="background:${hslToCss(i.colorProfile.dominantColor)}"></div>`).join('')}
-      </div>
 
       <div style="font-size:12px;color:var(--text-secondary);margin-top:12px">${new Date(outfit.dateCreated).toLocaleDateString()}</div>
     </div>
@@ -1441,11 +1724,175 @@ app.showOutfitDetail = async (id) => {
   lazyLoadImages();
 };
 
+app.applyOutfitFeedback = async (outfitId) => {
+  const feedback = document.getElementById('outfit-feedback-text')?.value?.trim();
+  if (!feedback) { alert('Please type what you want to change.'); return; }
+
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+
+  const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
+  const feedbackLower = feedback.toLowerCase();
+
+  // Parse "no X" exclusions
+  const noMatches = feedback.match(/no\s+(\w+)/gi) || [];
+  const excludeTerms = noMatches.map(m => m.replace(/^no\s+/i, '').toLowerCase());
+
+  // Parse "more X" / "add X" preferences
+  const moreMatches = feedback.match(/(?:more|add)\s+(\w+)/gi) || [];
+  const preferTerms = moreMatches.map(m => m.replace(/^(?:more|add)\s+/i, '').toLowerCase());
+
+  // Find categories mentioned in feedback
+  const categoriesToReplace = [];
+  for (const cat of CATEGORIES) {
+    if (feedbackLower.includes(cat.name.toLowerCase()) || feedbackLower.includes(cat.id)) {
+      categoriesToReplace.push(cat.id);
+    }
+  }
+
+  // Filter available items
+  let filteredItems = items.filter(i =>
+    !excludeTerms.some(t => i.name.toLowerCase().includes(t))
+  );
+
+  // Find best palette from current outfit
+  let bestPalette = palettes[0];
+  let bestAff = -1;
+  for (const pal of palettes) {
+    let aff = 0;
+    for (const item of oi) aff += paletteAffinity(item, pal.colors);
+    if (aff > bestAff) { bestAff = aff; bestPalette = pal; }
+  }
+
+  closeDetail();
+  showLoading('Generating 4 revised looks...');
+
+  // Generate 4 diverse variations
+  const newOutfits = [];
+
+  // Strategy: generate full outfit set, then pick top 4 diverse ones
+  // For category-specific feedback, shuffle alternatives in those categories
+  const results = generateOutfits(filteredItems, bestPalette);
+
+  // Also try with different palettes for variety
+  const otherPalettes = palettes.filter(p => p.id !== bestPalette.id).slice(0, 3);
+  for (const pal of otherPalettes) {
+    const moreResults = generateOutfits(filteredItems, pal);
+    results.push(...moreResults);
+  }
+
+  // Deduplicate and filter out the original outfit
+  const origIds = outfit.itemIds.sort().join(',');
+  const seen = new Set([origIds]);
+  const unique = [];
+  for (const r of results) {
+    const key = r.items.map(i => i.id).sort().join(',');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(r);
+  }
+
+  // Take top 4
+  unique.sort((a, b) => b.overallScore - a.overallScore);
+  const top4 = unique.slice(0, 4);
+
+  for (const r of top4) {
+    const idSet = r.items.map(i => i.id).sort().join(',');
+    const exists = outfits.some(o => (o.itemIds || []).sort().join(',') === idSet);
+    if (exists) continue;
+
+    const newOutfit = createOutfit({
+      itemIds: r.items.map(i => i.id),
+      colorScore: r.colorScore,
+      completenessScore: r.completenessScore,
+      styleScore: r.styleScore,
+      overallScore: r.overallScore,
+    });
+    await db.putOutfit(newOutfit);
+    outfits.push(newOutfit);
+    newOutfits.push(newOutfit);
+  }
+
+  hideLoading();
+
+  if (!newOutfits.length) {
+    openSheet(`
+      <div style="text-align:center;padding:24px">
+        <h2>No New Variations</h2>
+        <p style="color:var(--text-secondary);margin-bottom:16px">Could not find different outfits matching "${esc(feedback)}". Try different guidance.</p>
+        <button class="btn btn-primary" onclick="closeSheet()">OK</button>
+      </div>
+    `);
+    return;
+  }
+
+  // Show results
+  openSheet(`
+    <h2>Revised Looks</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">${newOutfits.length} new outfits based on: "${esc(feedback)}"</p>
+    <div class="outfit-list">
+      ${newOutfits.map(o => {
+        const oItems = o.itemIds.map(id => items.find(it => it.id === id)).filter(Boolean);
+        return `
+          <div class="outfit-card-wide" onclick="closeSheet(); app.showOutfitDetail('${o.id}')">
+            <div class="outfit-card-row">
+              <div class="outfit-card-ai">
+                <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg);flex-direction:column;gap:4px">
+                  <div class="spinner" style="width:20px;height:20px;margin:0"></div>
+                  <span style="font-size:10px;color:var(--text-secondary)">Generating...</span>
+                </div>
+              </div>
+              <div class="outfit-card-items">
+                ${oItems.map(item => `
+                  <div class="outfit-card-item">
+                    ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` :
+                      `<div class="outfit-card-item-placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
+                        ${CATEGORIES.find(c => c.id === item.category)?.icon || ''}
+                      </div>`}
+                    <span class="outfit-card-item-name">${esc(item.name)}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="score-badge">
+              <span class="pct ${scoreColor(o.overallScore)}">${Math.round(o.overallScore * 100)}%</span>
+              <span style="color:var(--text-secondary)">${oItems.length} items</span>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    <button class="btn btn-secondary" style="margin-top:16px" onclick="app.closeSheetAndRender()">Done</button>
+  `);
+  lazyLoadImages();
+
+  // Generate AI images in background
+  generateAiImagesInBackground(newOutfits.map(o => ({
+    items: o.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean),
+    _outfitObj: o,
+  })));
+};
+
 app.deleteOutfit = async (id) => {
   if (!confirm('Delete this outfit?')) return;
   await db.deleteOutfit(id);
   outfits = outfits.filter(o => o.id !== id);
   closeDetail();
+  renderOutfits();
+};
+
+app.quickDeleteOutfit = async (id) => {
+  if (!confirm('Delete this outfit?')) return;
+  await db.deleteOutfit(id);
+  outfits = outfits.filter(o => o.id !== id);
+  renderOutfits();
+};
+
+app.toggleFavorite = async (id) => {
+  const outfit = outfits.find(o => o.id === id);
+  if (!outfit) return;
+  outfit.favorite = !outfit.favorite;
+  await db.putOutfit(outfit);
   renderOutfits();
 };
 
@@ -1543,24 +1990,36 @@ function renderGeneratorResults() {
 
   div.innerHTML = `
     <div class="section-title">Results</div>
-    <div class="item-grid">
+    <div class="outfit-list">
       ${generatorResults.map((r, i) => `
-        <div class="outfit-card" onclick="app.showGeneratedDetail(${i})">
-          <div class="outfit-collage">
-            ${r.items.slice(0, 4).map(item => `
-              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="background:var(--bg)">` :
-                `<div class="placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
-                  ${CATEGORIES.find(c => c.id === item.category)?.icon || ''}
-                </div>`}
-            `).join('')}
-            ${r.items.length < 4 ? Array(4 - Math.min(r.items.length, 4)).fill('<div class="placeholder"></div>').join('') : ''}
+        <div class="outfit-card-wide" onclick="app.showGeneratedDetail(${i})">
+          <div class="outfit-card-row">
+            <div class="outfit-card-ai">
+              <div class="outfit-collage">
+                ${r.items.slice(0, 4).map(item => `
+                  ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="background:var(--bg)">` :
+                    `<div class="placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
+                      ${CATEGORIES.find(c => c.id === item.category)?.icon || ''}
+                    </div>`}
+                `).join('')}
+                ${r.items.length < 4 ? Array(4 - Math.min(r.items.length, 4)).fill('<div class="placeholder"></div>').join('') : ''}
+              </div>
+            </div>
+            <div class="outfit-card-items">
+              ${r.items.map(item => `
+                <div class="outfit-card-item">
+                  ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` :
+                    `<div class="outfit-card-item-placeholder" style="background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'}">
+                      ${CATEGORIES.find(c => c.id === item.category)?.icon || ''}
+                    </div>`}
+                  <span class="outfit-card-item-name">${esc(item.name)}</span>
+                </div>
+              `).join('')}
+            </div>
           </div>
           <div class="score-badge">
             <span class="pct ${scoreColor(r.overallScore)}">${Math.round(r.overallScore * 100)}%</span>
             <span style="color:var(--text-secondary)">${r.items.length} items</span>
-          </div>
-          <div class="palette-bar" style="height:6px;border-radius:0">
-            ${r.items.filter(i => i.colorProfile).map(i => `<div style="background:${hslToCss(i.colorProfile.dominantColor)}"></div>`).join('')}
           </div>
         </div>
       `).join('')}
@@ -1570,7 +2029,7 @@ function renderGeneratorResults() {
 
   // Progressive AI image generation
   setTimeout(() => {
-    const cards = div.querySelectorAll('.outfit-card');
+    const cards = div.querySelectorAll('.outfit-card-wide');
     console.log('[AI] Generator: found', cards.length, 'outfit cards, starting DALL-E generation...');
     generatorResults.forEach((r, i) => {
       if (cards[i]) enqueueImageGeneration(r.items, cards[i]);
@@ -1582,18 +2041,25 @@ app.showGeneratedDetail = (idx) => {
   const r = generatorResults[idx];
   if (!r) return;
 
+  const cacheKey2 = outfitImageCacheKey(r.items.map(i => i.id));
   openSheet(`
     <h2>Outfit Detail</h2>
-    ${r.items.map(item => `
-      <div class="item-row">
-        ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` : `<div style="width:50px;height:50px;border-radius:8px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center">${CATEGORIES.find(c => c.id === item.category)?.icon || ''}</div>`}
-        <div class="item-info">
-          <div class="name">${esc(item.name)}</div>
-          <div class="cat">${CATEGORIES.find(c => c.id === item.category)?.name || ''}</div>
-        </div>
-        ${item.colorProfile ? `<div class="swatch" style="background:${hslToCss(item.colorProfile.dominantColor)}"></div>` : ''}
+    <div class="outfit-side-by-side">
+      <div class="outfit-side-ai">
+        <img data-ai-cache-key="${cacheKey2}" class="lazy-ai-cache" style="width:100%;border-radius:var(--radius);background:var(--bg)">
       </div>
-    `).join('')}
+      <div class="outfit-side-items">
+        ${r.items.map(item => `
+          <div class="item-row" style="padding:6px 8px;margin-bottom:4px">
+            ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:40px;height:40px;border-radius:6px">` : `<div style="width:40px;height:40px;border-radius:6px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:14px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''}</div>`}
+            <div class="item-info" style="min-width:0">
+              <div class="name" style="font-size:12px">${esc(item.name)}</div>
+              <div class="cat" style="font-size:10px">${CATEGORIES.find(c => c.id === item.category)?.name || ''}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
 
     <div class="divider"></div>
     <div class="score-row"><span class="label">Color Match</span><span class="value ${scoreColor(r.colorScore)}">${Math.round(r.colorScore * 100)}%</span></div>
@@ -1665,7 +2131,7 @@ async function autoSaveOutfits(results) {
 // Track selected replacements
 app._replaceSelections = new Set();
 
-app.showReplaceItem = (outfitId, itemIndex) => {
+app.showReplaceItem = async (outfitId, itemIndex) => {
   const outfit = outfits.find(o => o.id === outfitId);
   if (!outfit) return;
 
@@ -1688,64 +2154,42 @@ app.showReplaceItem = (outfitId, itemIndex) => {
     return;
   }
 
-  app._replaceSelections = new Set();
+  // Auto-pick best 3-4 alternatives by color harmony with the other outfit items
+  const otherItems = outfit.itemIds
+    .filter((_, idx) => idx !== itemIndex)
+    .map(id => items.find(i => i.id === id))
+    .filter(Boolean);
+
+  // Score each alternative by how well it fits with the rest
+  const scored = alternatives.map(alt => {
+    let score = 0;
+    for (const pal of palettes) {
+      score += paletteAffinity(alt, pal.colors);
+    }
+    // Bonus for harmony with other items
+    if (alt.colorProfile && otherItems.length) {
+      const testItems = [...otherItems, alt];
+      for (const pal of palettes) {
+        score += colorScore(testItems, pal.colors) * 2;
+      }
+    }
+    return { item: alt, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const bestAlts = scored.slice(0, Math.min(4, scored.length)).map(s => s.item);
+
+  // Auto-select and execute
+  app._replaceSelections = new Set(bestAlts.map(a => a.id));
   app._replaceOutfitId = outfitId;
   app._replaceItemIndex = itemIndex;
 
-  openSheet(`
-    <h2>Replace ${cat?.name || 'Item'}</h2>
-    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
-      Current: ${esc(currentItem.name)} — select up to 4 replacements
-    </p>
-    <div id="replace-list" style="max-height:400px;overflow-y:auto">
-      ${alternatives.map(alt => `
-        <div class="pick-item-row" id="replace-row-${alt.id}" onclick="app.toggleReplaceSelection('${alt.id}')">
-          ${alt.imageId ? `<img data-image-id="${alt.imageId}" class="lazy-img" style="width:50px;height:50px;border-radius:8px;object-fit:cover">` :
-            `<div style="width:50px;height:50px;border-radius:8px;background:var(--border);display:flex;align-items:center;justify-content:center">${cat?.icon || ''}</div>`}
-          <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(alt.name)}</div>
-          </div>
-          ${alt.colorProfile ? `<div class="swatch" style="background:${hslToCss(alt.colorProfile.dominantColor)}"></div>` : ''}
-          <div class="replace-check" style="width:24px;height:24px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0"></div>
-        </div>
-      `).join('')}
-    </div>
-    <button id="replace-go-btn" class="btn btn-primary" style="margin-top:12px" onclick="app.executeReplace()" disabled>
-      Create Outfit Variations (0 selected)
-    </button>
-    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Cancel</button>
-  `);
-  lazyLoadImages();
+  // Show what we're doing and auto-execute
+  showLoading(`Creating ${bestAlts.length} variations with best ${cat?.name?.toLowerCase() || 'item'} matches...`);
+  await new Promise(r => setTimeout(r, 100));
+  await app.executeReplace();
 };
 
-app.toggleReplaceSelection = (altId) => {
-  if (app._replaceSelections.has(altId)) {
-    app._replaceSelections.delete(altId);
-  } else {
-    if (app._replaceSelections.size >= 4) return; // max 4
-    app._replaceSelections.add(altId);
-  }
-
-  // Update visual state
-  document.querySelectorAll('#replace-list .pick-item-row').forEach(row => {
-    const id = row.id.replace('replace-row-', '');
-    const check = row.querySelector('.replace-check');
-    if (app._replaceSelections.has(id)) {
-      row.classList.add('selected');
-      if (check) check.innerHTML = '<span style="color:var(--accent);font-size:16px;font-weight:700">✓</span>';
-    } else {
-      row.classList.remove('selected');
-      if (check) check.innerHTML = '';
-    }
-  });
-
-  const count = app._replaceSelections.size;
-  const btn = document.getElementById('replace-go-btn');
-  if (btn) {
-    btn.disabled = count === 0;
-    btn.textContent = `Create ${count} Outfit Variation${count !== 1 ? 's' : ''} (${count} selected)`;
-  }
-};
+// toggleReplaceSelection removed — replace is now fully automatic
 
 app.executeReplace = async () => {
   const outfitId = app._replaceOutfitId;
@@ -1852,7 +2296,7 @@ app.executeReplace = async () => {
     for (const o of newOutfits) {
       try {
         const oi = o.itemIds.map(id => items.find(it => it.id === id)).filter(Boolean);
-        const descriptions = oi.map(it => it.name);
+        const descriptions = oi.map(it => ({ name: it.name, color: it.colorProfile?.dominantColor }));
         const blob = await generateOutfitImage(descriptions, apiKey);
         const cacheKey = outfitImageCacheKey(o.itemIds);
         await db.saveImage(cacheKey, blob);
@@ -1902,9 +2346,10 @@ function openDetail(html) {
   lazyLoadImages();
 }
 
-app.closeDetail = () => {
+function closeDetail() {
   document.getElementById('detail-overlay').classList.remove('open');
-};
+}
+app.closeDetail = closeDetail;
 
 // Lazy load images from IndexedDB
 async function lazyLoadImages() {
@@ -1918,13 +2363,23 @@ async function lazyLoadImages() {
       if (blob) img.src = URL.createObjectURL(blob);
     } catch {}
   }
-  // AI-generated outfit images
+  // AI-generated outfit images (by outfit aiImageId)
   const aiImgs = document.querySelectorAll('.lazy-ai-img:not([src])');
   for (const img of aiImgs) {
     const imageId = img.dataset.aiImageId;
     if (!imageId) continue;
     try {
       const blob = await db.loadImage(imageId);
+      if (blob) img.src = URL.createObjectURL(blob);
+    } catch {}
+  }
+  // AI images by cache key (for generated outfit detail views)
+  const aiCacheImgs = document.querySelectorAll('.lazy-ai-cache:not([src])');
+  for (const img of aiCacheImgs) {
+    const cacheKey = img.dataset.aiCacheKey;
+    if (!cacheKey) continue;
+    try {
+      const blob = await db.loadImage(cacheKey);
       if (blob) img.src = URL.createObjectURL(blob);
     } catch {}
   }
