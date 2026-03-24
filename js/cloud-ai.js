@@ -86,7 +86,7 @@ export async function generateOutfitImage(itemDescriptions, apiKey) {
   if (!apiKey) throw new Error('OpenAI API key not set.');
 
   const itemList = itemDescriptions.join(', ');
-  const prompt = `Professional fashion flat-lay photograph on a clean white background, overhead view. A complete outfit neatly arranged: ${itemList}. Photorealistic, studio lighting, fashion editorial style, top-down view. No text, no labels, no people, no mannequin.`;
+  const prompt = `Ultra-realistic professional fashion photograph of an athletic male model (mid-20s, clean-shaven, athletic build) wearing exactly this outfit: ${itemList}. Full body shot from head to toe, standing pose, neutral light gray studio background. Shot on Canon EOS R5 with 85mm lens, soft natural studio lighting, fashion editorial magazine quality. Hyper-realistic skin textures, natural fabric draping and creasing. No text, no watermarks, no logos.`;
 
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',

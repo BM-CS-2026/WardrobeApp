@@ -832,6 +832,15 @@ body {
 .garment-row .check { font-size: 22px; color: var(--accent); }
 .garment-row:not(.selected) .check { opacity: 0.3; }
 
+/* Replaceable item rows in outfit detail */
+.item-row.item-replaceable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.item-row.item-replaceable:active {
+  background: var(--accent-light);
+}
+
 /* File input hidden */
 .file-input { display: none; }
 

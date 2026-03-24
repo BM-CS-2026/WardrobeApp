@@ -9,7 +9,7 @@
   <title>Wardrobe</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/styles.css?v=8">
+  <link rel="stylesheet" href="css/styles.css?v=9">
   <script>
     // Show any JS errors as visible alerts
     window.onerror = function(msg, src, line) {
@@ -101,6 +101,10 @@
     </div>
   </div>
 
+  <!-- Hidden file inputs (must live outside the sheet so they persist after closeSheet) -->
+  <input type="file" accept="image/*" multiple class="file-input" id="file-picker-hidden">
+  <input type="file" accept="image/*" capture="environment" class="file-input" id="file-camera-hidden">
+
   <!-- Loading Overlay -->
   <div id="loading-overlay" class="loading-overlay">
     <div class="loading-box">
@@ -109,6 +113,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=8"></script>
+  <script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>
