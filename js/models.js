@@ -1,0 +1,37 @@
+import { generateId } from './utils.js';
+
+export function createClothingItem({ name, category, styleTags = [], colorProfile = null, imageId = null }) {
+  return {
+    id: generateId(),
+    name,
+    category,
+    styleTags,
+    colorProfile,
+    imageId,
+    dateAdded: Date.now(),
+  };
+}
+
+export function createColorPalette({ name, colors, harmonyType, isBuiltIn = false }) {
+  return {
+    id: generateId(),
+    name,
+    colors,
+    harmonyType,
+    isBuiltIn,
+  };
+}
+
+export function createOutfit({ itemIds, colorScore, completenessScore, styleScore, overallScore, aiImageId = null }) {
+  return {
+    id: generateId(),
+    itemIds,
+    colorScore,
+    completenessScore,
+    styleScore,
+    overallScore,
+    aiImageId,
+    isSaved: true,
+    dateCreated: Date.now(),
+  };
+}
