@@ -2,7 +2,7 @@
   "name": "WardrobeApp",
   "short_name": "Wardrobe",
   "description": "Personal wardrobe manager with color-based outfit suggestions",
-  "start_url": "/",
+  "start_url": ".",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#4874d4",

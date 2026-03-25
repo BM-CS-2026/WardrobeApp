@@ -1,9 +1,12 @@
-import * as db from './db.js?v=20';
+import * as db from './db.js?v=25';
 import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=20';
 import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=20';
 import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=20';
 import { analyzeOutfitPhoto, generateOutfitImage } from './cloud-ai.js?v=20';
 import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES, VIBES } from './utils.js?v=20';
+
+// ── Global app object (must be first) ──
+window.app = {};
 
 // ── State ──
 let currentTab = 'wardrobe';
@@ -76,17 +79,14 @@ async function triggerOutfitImageGeneration(outfitItems, cardElement, outfitObj)
   }
 }
 
-function replaceCollageWithAiImage(cardElement, blob) {
+function replaceCollageWithAiImage(cardElement, data) {
+  const url = (typeof data === 'string') ? data : URL.createObjectURL(data);
   const aiDiv = cardElement.querySelector('.outfit-card-ai');
   if (aiDiv) {
-    // New wide card layout: put AI image in the dedicated AI column
-    const url = URL.createObjectURL(blob);
     aiDiv.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm)">`;
   } else {
-    // Fallback for old card layout
     const collage = cardElement.querySelector('.outfit-collage');
     if (!collage) return;
-    const url = URL.createObjectURL(blob);
     collage.innerHTML = `<img src="${url}">`;
     collage.classList.add('ai-generated');
   }
@@ -121,17 +121,95 @@ function showCardErrorState(cardElement, message) {
 // ── Init ──
 document.addEventListener('DOMContentLoaded', async () => {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
+
+  // Migrate from old IndexedDB if needed
+  const migrated = await db.migrateFromOldDB((done, total) => {
+    document.getElementById('loading-msg').textContent = `Migrating data... ${done}/${total}`;
+  });
+  if (migrated) console.log('[App] Migration from old DB complete');
+
   await loadData();
   await ensureBuiltInPalettes();
   setupTabs();
   renderCurrentTab();
 
+  // Repair any old attachment-based images
+  const repaired = await db.repairImages((done, total) => {
+    if (done === 1) showLoading('Repairing images...');
+    document.getElementById('loading-msg').textContent = `Repairing images... ${done}/${total}`;
+  });
+  if (repaired > 0) {
+    hideLoading();
+    renderCurrentTab();
+  }
+
+  // Auto-start sync if configured
+  startSyncIfConfigured();
+
   // Wire up persistent file inputs
   document.getElementById('file-picker-hidden').onchange = function() { app.handlePhotos(this); };
   document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
 });
+
+// ── Sync ──
+
+function setSyncDot(state) {
+  const dot = document.getElementById('sync-dot');
+  if (!dot) return;
+  const colors = { paused: '#4CAF50', active: '#2196F3', error: '#f44336', off: '#999' };
+  dot.style.background = colors[state] || colors.off;
+  dot.title = state === 'paused' ? 'Synced' : state === 'active' ? 'Syncing...' : state === 'error' ? 'Sync error' : 'Sync not configured';
+}
+
+function startSyncIfConfigured() {
+  const url = db.getSyncUrl();
+  if (!url) { setSyncDot('off'); return; }
+  db.setupSync(url, async (event, info) => {
+    setSyncDot(event === 'error' ? 'error' : event);
+    if (event === 'change') {
+      // Remote changes arrived — reload data and re-render
+      await loadData();
+      renderCurrentTab();
+    }
+  });
+  setSyncDot('active');
+}
+
+app.showSyncSettings = () => {
+  const currentUrl = db.getSyncUrl();
+  openSheet(`
+    <h2>Cloud Sync</h2>
+    <p style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
+      Enter your Cloudant database URL to sync between devices.<br>
+      Format: <code style="font-size:11px">https://apikey:pass@account.cloudantnosqldb.appdomain.cloud/wardrobe</code>
+    </p>
+    <div class="form-group">
+      <input id="sync-url-input" type="url" placeholder="https://..." value="${currentUrl}" style="font-size:13px">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-primary" onclick="app.saveSyncUrl()" style="flex:1">Save & Sync</button>
+      ${currentUrl ? '<button class="btn btn-secondary" onclick="app.disconnectSync()" style="flex:1">Disconnect</button>' : ''}
+    </div>
+  `);
+};
+
+app.saveSyncUrl = () => {
+  const url = document.getElementById('sync-url-input')?.value?.trim();
+  if (!url) { alert('Please enter a URL.'); return; }
+  db.setSyncUrl(url);
+  db.stopSync();
+  closeSheet();
+  startSyncIfConfigured();
+};
+
+app.disconnectSync = () => {
+  db.stopSync();
+  db.setSyncUrl('');
+  setSyncDot('off');
+  closeSheet();
+};
 
 async function loadData() {
   [items, palettes, outfits] = await Promise.all([
@@ -193,6 +271,8 @@ function renderWardrobe() {
       <div style="display:flex;gap:8px">
         ${items.length > 0 ? `<button class="btn-icon" onclick="app.toggleSelectMode()" title="Select items" style="font-size:16px;${selectMode ? 'background:var(--accent);color:white' : ''}">${selectMode ? '✕' : '☑'}</button>` : ''}
         ${items.length > 0 ? `<button class="btn-icon" onclick="app.reanalyzeAll()" title="Re-analyze items" style="font-size:16px">🔄</button>` : ''}
+        ${items.length > 0 ? `<button class="btn-icon" onclick="app.exportWardrobe()" title="Export" style="font-size:16px">📤</button>` : ''}
+        <button class="btn-icon" onclick="app.showImportWardrobe()" title="Import" style="font-size:16px">📥</button>
         <button class="btn-icon" onclick="app.startCreateOutfit()" title="Create Outfit" style="font-size:16px">✨</button>
         <button class="btn-icon" onclick="app.showAddFlow()">+</button>
       </div>
@@ -250,7 +330,6 @@ function renderItemCard(item) {
 }
 
 // ── Add Flow ──
-window.app = {};
 
 // Holds newly added items after AI analysis so we can show the results screen
 let newlyAddedItems = [];
@@ -556,6 +635,66 @@ app.deleteAllItems = async () => {
   outfits = [];
   hideLoading();
   renderWardrobe();
+};
+
+// ══════════════════════════════════════
+// ── EXPORT / IMPORT WARDROBE ──
+// ══════════════════════════════════════
+
+app.exportWardrobe = async () => {
+  showLoading('Exporting wardrobe...');
+  try {
+    const data = await db.exportAll((done, total) => {
+      document.getElementById('loading-msg').textContent = `Exporting images... ${done}/${total}`;
+    });
+    const json = JSON.stringify(data);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `wardrobe-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    hideLoading();
+  } catch (err) {
+    hideLoading();
+    alert('Export failed: ' + err.message);
+  }
+};
+
+app.showImportWardrobe = () => {
+  openSheet(`
+    <h2>Import Wardrobe</h2>
+    <p style="color:var(--text-secondary);margin-bottom:16px">Select a wardrobe backup file (.json) to import. Existing items will be kept — duplicates are merged.</p>
+    <input type="file" accept=".json,application/json" id="import-file-input" style="margin-bottom:16px">
+    <button class="btn btn-primary" onclick="app.doImportWardrobe()">Import</button>
+  `);
+};
+
+app.doImportWardrobe = async () => {
+  const fileInput = document.getElementById('import-file-input');
+  const file = fileInput?.files?.[0];
+  if (!file) { alert('Please select a file.'); return; }
+
+  closeSheet();
+  showLoading('Reading file...');
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data.items && !data.palettes && !data.outfits) {
+      throw new Error('Invalid backup file — no wardrobe data found.');
+    }
+    const result = await db.importAll(data, (done, total) => {
+      document.getElementById('loading-msg').textContent = `Importing... ${done}/${total}`;
+    });
+    hideLoading();
+    await loadData();
+    renderWardrobe();
+    alert(`Imported ${result.items} items, ${result.palettes} palettes, ${result.outfits} outfits, ${result.images} images.`);
+  } catch (err) {
+    hideLoading();
+    alert('Import failed: ' + err.message);
+  }
 };
 
 // ══════════════════════════════════════
@@ -1209,8 +1348,8 @@ app.showItemDetail = async (id) => {
 
   let imgSrc = '';
   if (item.imageId) {
-    const blob = await db.loadImage(item.imageId);
-    if (blob) imgSrc = URL.createObjectURL(blob);
+    const data = await db.loadImage(item.imageId);
+    if (data) imgSrc = (typeof data === 'string') ? data : URL.createObjectURL(data);
   }
 
   const cp = item.colorProfile;
@@ -2352,6 +2491,12 @@ function closeDetail() {
 app.closeDetail = closeDetail;
 
 // Lazy load images from IndexedDB
+function imgSrcFromLoaded(data) {
+  if (!data) return null;
+  if (typeof data === 'string') return data;  // data URL
+  return URL.createObjectURL(data);            // blob
+}
+
 async function lazyLoadImages() {
   await new Promise(r => setTimeout(r, 10));
   const imgs = document.querySelectorAll('.lazy-img:not([src])');
@@ -2359,28 +2504,26 @@ async function lazyLoadImages() {
     const imageId = img.dataset.imageId;
     if (!imageId) continue;
     try {
-      const blob = await db.loadImage(imageId);
-      if (blob) img.src = URL.createObjectURL(blob);
+      const src = imgSrcFromLoaded(await db.loadImage(imageId));
+      if (src) img.src = src;
     } catch {}
   }
-  // AI-generated outfit images (by outfit aiImageId)
   const aiImgs = document.querySelectorAll('.lazy-ai-img:not([src])');
   for (const img of aiImgs) {
     const imageId = img.dataset.aiImageId;
     if (!imageId) continue;
     try {
-      const blob = await db.loadImage(imageId);
-      if (blob) img.src = URL.createObjectURL(blob);
+      const src = imgSrcFromLoaded(await db.loadImage(imageId));
+      if (src) img.src = src;
     } catch {}
   }
-  // AI images by cache key (for generated outfit detail views)
   const aiCacheImgs = document.querySelectorAll('.lazy-ai-cache:not([src])');
   for (const img of aiCacheImgs) {
     const cacheKey = img.dataset.aiCacheKey;
     if (!cacheKey) continue;
     try {
-      const blob = await db.loadImage(cacheKey);
-      if (blob) img.src = URL.createObjectURL(blob);
+      const src = imgSrcFromLoaded(await db.loadImage(cacheKey));
+      if (src) img.src = src;
     } catch {}
   }
 }

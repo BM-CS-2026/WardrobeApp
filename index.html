@@ -6,10 +6,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#4874d4">
-  <title>Wardrobe</title>
+  <title>Wardrobe v24</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/styles.css?v=20a">
+  <link rel="stylesheet" href="css/styles.css?v=25">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -23,12 +23,9 @@
       alert('JS Error: ' + e.reason);
     });
 
-    // Force unregister old service workers to ensure fresh files load
+    // Clear old caches on version change (service worker handles this too)
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => r.unregister());
-      });
-      caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+      caches.keys().then(keys => keys.filter(k => k !== 'wardrobe-v25').forEach(k => caches.delete(k)));
     }
   </script>
 </head>
@@ -42,6 +39,7 @@
       </svg>
       <span>Home</span>
     </button>
+    <span id="sync-dot" title="Sync status" onclick="window.app && app.showSyncSettings()" style="width:10px;height:10px;border-radius:50%;background:#999;display:inline-block;cursor:pointer;margin-left:auto;margin-right:12px"></span>
   </div>
 
   <!-- App content area -->
@@ -127,6 +125,7 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js?v=20a"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+  <script type="module" src="js/app.js?v=25"></script>
 </body>
 </html>

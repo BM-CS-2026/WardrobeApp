@@ -1,16 +1,17 @@
-const CACHE_NAME = 'wardrobe-v20';
+const CACHE_NAME = 'wardrobe-v25';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/css/styles.css',
-  '/js/app.js',
-  '/js/db.js',
-  '/js/models.js',
-  '/js/color-engine.js',
-  '/js/outfit-generator.js',
-  '/js/cloud-ai.js',
-  '/js/utils.js',
-  '/manifest.json'
+  './',
+  './index.html',
+  './css/styles.css',
+  './js/app.js',
+  './js/db.js',
+  './js/models.js',
+  './js/color-engine.js',
+  './js/outfit-generator.js',
+  './js/cloud-ai.js',
+  './js/utils.js',
+  './manifest.json',
+  'https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js'
 ];
 
 self.addEventListener('install', e => {
