@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Wardrobe</title>
+  <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; padding-bottom: 80px; }
+    .header { background: #4874d4; color: white; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
+    .header h1 { font-size: 18px; }
+    .sync-dot { width: 12px; height: 12px; border-radius: 50%; background: #999; cursor: pointer; }
+    .status { padding: 8px 16px; background: #e3f2fd; font-size: 13px; text-align: center; }
+    .category { padding: 12px 16px; }
+    .cat-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+    .items-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .item-card { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .item-card img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #eee; }
+    .item-card .placeholder { width: 100%; aspect-ratio: 1; background: #eee; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+    .item-card .name { padding: 4px 6px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .colors { display: flex; gap: 2px; padding: 2px 6px 4px; }
+    .colors span { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); }
+    .loading { position: fixed; inset: 0; background: rgba(255,255,255,0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
+    .loading.hidden { display: none; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #4874d4; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .sync-panel { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 50; display: flex; align-items: flex-end; }
+    .sync-panel.hidden { display: none; }
+    .sync-sheet { background: white; width: 100%; border-radius: 16px 16px 0 0; padding: 20px; }
+    .sync-sheet input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; margin: 8px 0; }
+    .sync-sheet button { padding: 12px; border: none; border-radius: 8px; font-size: 15px; width: 100%; margin-top: 8px; cursor: pointer; }
+    .btn-primary { background: #4874d4; color: white; }
+    .btn-danger { background: #f44336; color: white; }
+    .empty { color: #999; text-align: center; padding: 16px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Wardrobe</h1>
+    <div class="sync-dot" id="dot" onclick="toggleSyncPanel()"></div>
+  </div>
+  <div id="status-bar" class="status" style="display:none"></div>
+  <div id="content"></div>
+
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <p id="loading-msg" style="margin-top:12px; color:#666">Loading...</p>
+  </div>
+
+  <div class="sync-panel hidden" id="sync-panel" onclick="if(event.target===this)toggleSyncPanel()">
+    <div class="sync-sheet">
+      <h2 style="margin-bottom:8px">Cloud Sync</h2>
+      <p style="font-size:12px;color:#888;margin-bottom:8px">Enter your Cloudant details</p>
+      <input id="sync-host" type="url" placeholder="https://...cloudant.../wardrobe" style="font-size:12px">
+      <input id="sync-user" type="text" placeholder="Username (apikey-v2-...)" style="font-size:12px">
+      <input id="sync-pass" type="password" placeholder="Password" style="font-size:12px">
+      <button class="btn-primary" onclick="saveSync()">Save & Sync</button>
+      <button class="btn-danger" onclick="disconnectSync()" style="margin-top:4px">Disconnect</button>
+    </div>
+  </div>
+
+  <script>
+    const CATEGORIES = [
+      { id: 'shirt', name: 'Shirts', icon: '👔' },
+      { id: 'pants', name: 'Pants', icon: '👖' },
+      { id: 'shoes', name: 'Shoes', icon: '👟' },
+      { id: 'belt', name: 'Belts', icon: '🎀' },
+      { id: 'jacket', name: 'Jackets', icon: '🧥' },
+    ];
+
+    const localDB = new PouchDB('wardrobe_phone');
+    let items = [];
+    let imageCache = {};
+
+    function setDot(color) {
+      document.getElementById('dot').style.background = color;
+    }
+
+    function showLoad(msg) {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('loading-msg').textContent = msg;
+    }
+
+    function hideLoad() {
+      document.getElementById('loading').classList.add('hidden');
+    }
+
+    function toggleSyncPanel() {
+      const panel = document.getElementById('sync-panel');
+      panel.classList.toggle('hidden');
+      document.getElementById('sync-host').value = localStorage.getItem('phone_sync_host') || '';
+      document.getElementById('sync-user').value = localStorage.getItem('phone_sync_user') || '';
+      document.getElementById('sync-pass').value = localStorage.getItem('phone_sync_pass') || '';
+    }
+
+    async function saveSync() {
+      const host = document.getElementById('sync-host').value.trim();
+      const user = document.getElementById('sync-user').value.trim();
+      const pass = document.getElementById('sync-pass').value.trim();
+      if (!host) return alert('Enter the database URL');
+      localStorage.setItem('phone_sync_host', host);
+      localStorage.setItem('phone_sync_user', user);
+      localStorage.setItem('phone_sync_pass', pass);
+      document.getElementById('sync-panel').classList.add('hidden');
+      await doSync(host, user, pass);
+    }
+
+    function disconnectSync() {
+      localStorage.removeItem('phone_sync_host');
+      localStorage.removeItem('phone_sync_user');
+      localStorage.removeItem('phone_sync_pass');
+      setDot('#999');
+      document.getElementById('sync-panel').classList.add('hidden');
+    }
+
+    async function cloudFetch(host, user, pass, path) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (user && pass) headers['Authorization'] = 'Basic ' + btoa(user + ':' + pass);
+      const resp = await fetch(host + (path || ''), { headers });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    }
+
+    async function doSync(host, user, pass) {
+      showLoad('Connecting...');
+      setDot('#2196F3');
+      try {
+        // Get database info
+        const info = await cloudFetch(host, user, pass, '');
+        const total = info.doc_count;
+        showLoad('Syncing 0/' + total + ' docs...');
+
+        // Fetch all docs in batches
+        let skip = 0, written = 0;
+        const batchSize = 25;
+        while (skip < total + batchSize) {
+          const batch = await cloudFetch(host, user, pass,
+            '/_all_docs?include_docs=true&limit=' + batchSize + '&skip=' + skip);
+          if (!batch.rows || batch.rows.length === 0) break;
+
+          for (const row of batch.rows) {
+            const doc = row.doc;
+            if (!doc || doc._id.startsWith('_design/')) continue;
+            const { _rev, ...cleanDoc } = doc;
+            try {
+              const existing = await localDB.get(doc._id).catch(() => null);
+              if (existing) cleanDoc._rev = existing._rev;
+              await localDB.put(cleanDoc);
+              written++;
+            } catch (e) { /* skip conflicts */ }
+          }
+          skip += batchSize;
+          showLoad('Syncing ' + written + '/' + total + ' docs...');
+        }
+
+        setDot('#4CAF50');
+        showLoad('Loading wardrobe...');
+        await loadAndRender();
+        hideLoad();
+      } catch (e) {
+        setDot('#f44336');
+        hideLoad();
+        alert('Sync failed: ' + e.message);
+      }
+    }
+
+    async function loadAndRender() {
+      // Load items
+      const result = await localDB.allDocs({
+        include_docs: true,
+        startkey: 'items:',
+        endkey: 'items:\ufff0'
+      });
+      items = result.rows.map(r => {
+        const { _id, _rev, type, ...rest } = r.doc;
+        return { ...rest, id: _id.split(':').slice(1).join(':') };
+      });
+
+      // Render
+      let html = '';
+      for (const cat of CATEGORIES) {
+        const catItems = items.filter(i => i.category === cat.id)
+          .sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
+        html += `<div class="category">
+          <div class="cat-title">${cat.icon} ${cat.name} (${catItems.length})</div>`;
+        if (catItems.length === 0) {
+          html += `<div class="empty">No ${cat.name.toLowerCase()} yet</div>`;
+        } else {
+          html += `<div class="items-grid">`;
+          for (const item of catItems) {
+            const colors = item.colorProfile?.dominantColor
+              ? [item.colorProfile.dominantColor, ...(item.colorProfile.accentColors || [])].slice(0, 3)
+              : [];
+            const colorDots = colors.map(c =>
+              `<span style="background:hsl(${c.h},${c.s}%,${c.l}%)"></span>`
+            ).join('');
+            html += `<div class="item-card">
+              <div class="placeholder" data-img-id="${item.imageId || ''}">👔</div>
+              <div class="name">${item.name || 'Item'}</div>
+              <div class="colors">${colorDots}</div>
+            </div>`;
+          }
+          html += `</div>`;
+        }
+        html += `</div>`;
+      }
+      document.getElementById('content').innerHTML = html;
+
+      // Lazy load images
+      loadImages();
+    }
+
+    async function loadImages() {
+      const placeholders = document.querySelectorAll('.placeholder[data-img-id]');
+      for (const el of placeholders) {
+        const imgId = el.dataset.imgId;
+        if (!imgId) continue;
+        try {
+          const doc = await localDB.get('images:' + imgId);
+          if (doc.dataUrl) {
+            const img = document.createElement('img');
+            img.src = doc.dataUrl;
+            el.replaceWith(img);
+          }
+        } catch (e) { /* image not synced yet */ }
+      }
+    }
+
+    // Startup
+    (async () => {
+      const host = localStorage.getItem('phone_sync_host');
+      const user = localStorage.getItem('phone_sync_user');
+      const pass = localStorage.getItem('phone_sync_pass');
+      if (host) {
+        await doSync(host, user, pass);
+      } else {
+        // Just load local data
+        await loadAndRender();
+        hideLoad();
+      }
+    })();
+  </script>
+</body>
+</html>
