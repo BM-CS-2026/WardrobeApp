@@ -105,11 +105,31 @@
       document.getElementById('sync-panel').classList.add('hidden');
     }
 
+    function parseAuthUrl(url) {
+      // Extract credentials from https://user:pass@host/db format
+      const match = url.match(/^(https?:\/\/)([^:]+):([^@]+)@(.+)$/);
+      if (match) {
+        return {
+          url: match[1] + match[4],
+          auth: { username: decodeURIComponent(match[2]), password: decodeURIComponent(match[3]) }
+        };
+      }
+      return { url: url, auth: null };
+    }
+
     async function doSync(url) {
       showLoad('Connecting...');
       setDot('#2196F3');
       try {
-        const remote = new PouchDB(url);
+        const parsed = parseAuthUrl(url);
+        const opts = {};
+        if (parsed.auth) {
+          opts.fetch = function(fetchUrl, fetchOpts) {
+            fetchOpts.headers.set('Authorization', 'Basic ' + btoa(parsed.auth.username + ':' + parsed.auth.password));
+            return PouchDB.fetch(fetchUrl, fetchOpts);
+          };
+        }
+        const remote = new PouchDB(parsed.url, opts);
         const info = await remote.info();
         showLoad('Syncing 0/' + info.doc_count + ' docs...');
 
