@@ -1,7 +1,7 @@
 // PouchDB-based storage with live sync
 // Replaces the old raw IndexedDB wrapper — same public API
 
-const db = new PouchDB('wardrobe_sync');
+const db = new PouchDB('wardrobe_phone2');
 
 let remoteDB = null;
 let syncHandler = null;
