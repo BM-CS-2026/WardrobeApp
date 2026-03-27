@@ -163,18 +163,28 @@ function setSyncDot(state) {
   dot.title = state === 'paused' ? 'Synced' : state === 'active' ? 'Syncing...' : state === 'error' ? 'Sync error' : 'Sync not configured';
 }
 
-function startSyncIfConfigured() {
+async function startSyncIfConfigured() {
   const url = db.getSyncUrl();
   if (!url) { setSyncDot('off'); return; }
+
+  // Do an initial one-time pull first to get all remote data
+  setSyncDot('active');
+  try {
+    await db.pullOnce(url);
+    await loadData();
+    renderCurrentTab();
+  } catch (e) {
+    console.warn('[Sync] Initial pull failed:', e);
+  }
+
+  // Then start live sync for ongoing changes
   db.setupSync(url, async (event, info) => {
     setSyncDot(event === 'error' ? 'error' : event);
     if (event === 'change' || event === 'paused') {
-      // Reload data on change and when sync catches up
       await loadData();
       renderCurrentTab();
     }
   });
-  setSyncDot('active');
 }
 
 app.showSyncSettings = () => {

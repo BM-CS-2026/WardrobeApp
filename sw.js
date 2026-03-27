@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wardrobe-v26';
+const CACHE_NAME = 'wardrobe-v27';
 const ASSETS = [
   './',
   './index.html',

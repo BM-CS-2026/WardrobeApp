@@ -222,6 +222,11 @@ export function setSyncUrl(url) {
   else localStorage.removeItem('sync_remote_url');
 }
 
+export async function pullOnce(remoteUrl) {
+  const remote = new PouchDB(remoteUrl);
+  return db.replicate.from(remote);
+}
+
 export function setupSync(remoteUrl, onChange) {
   if (syncHandler) syncHandler.cancel();
   _onSyncChange = onChange;
