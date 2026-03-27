@@ -120,9 +120,10 @@ function showCardErrorState(cardElement, message) {
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded', async () => {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  }
+  // Service worker disabled — using Cloudant sync instead
+  // if ('serviceWorker' in navigator) {
+  //   navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // }
 
   // Migrate from old IndexedDB if needed
   const migrated = await db.migrateFromOldDB((done, total) => {

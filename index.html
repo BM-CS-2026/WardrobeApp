@@ -23,9 +23,12 @@
       alert('JS Error: ' + e.reason);
     });
 
-    // Clear old caches on version change (service worker handles this too)
+    // Force unregister all service workers and clear all caches
     if ('serviceWorker' in navigator) {
-      caches.keys().then(keys => keys.filter(k => k !== 'wardrobe-v30').forEach(k => caches.delete(k)));
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => r.unregister());
+      });
+      caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
     }
   </script>
 </head>
