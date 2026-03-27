@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sync Test</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 20px; font-size: 14px; }
+    button { font-size: 16px; padding: 12px 24px; background: #4874d4; color: white; border: none; border-radius: 8px; margin: 8px 4px; }
+    #log { white-space: pre-wrap; background: #f5f5f5; padding: 12px; border-radius: 8px; margin-top: 16px; max-height: 70vh; overflow-y: auto; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+</head>
+<body>
+  <h2>Sync Diagnostic</h2>
+  <button onclick="checkLocal()">1. Check Local DB</button>
+  <button onclick="pullFromCloud()">2. Pull from Cloudant</button>
+  <button onclick="checkAfterPull()">3. Check Again</button>
+  <div id="log"></div>
+
+  <script>
+    const SYNC_URL = 'https://apikey-v2-gpwk0yx64xo3i0ebgtjt3oda466k3s37g3klqbddahc:9ded88c5e1df9687f8a654bcbdee55ef@7b7e645a-2b7a-4830-8679-437cda663e7c-bluemix.cloudantnosqldb.appdomain.cloud/wardrobe';
+
+    function log(msg) {
+      document.getElementById('log').textContent += msg + '\n';
+    }
+
+    async function checkLocal() {
+      document.getElementById('log').textContent = '';
+      log('Opening local PouchDB (wardrobe_sync)...');
+      const db = new PouchDB('wardrobe_sync');
+      const info = await db.info();
+      log('DB info: ' + JSON.stringify(info));
+
+      const all = await db.allDocs({ limit: 0 });
+      log('Total docs: ' + all.total_rows);
+
+      // Count by type
+      const allDocs = await db.allDocs({ include_docs: false });
+      const types = {};
+      for (const row of allDocs.rows) {
+        const t = row.id.split(':')[0];
+        types[t] = (types[t] || 0) + 1;
+      }
+      log('By type: ' + JSON.stringify(types));
+      log('Done.');
+    }
+
+    async function pullFromCloud() {
+      document.getElementById('log').textContent = '';
+      log('Opening local PouchDB...');
+      const localDB = new PouchDB('wardrobe_sync');
+
+      log('Connecting to Cloudant...');
+      const remoteDB = new PouchDB(SYNC_URL);
+
+      try {
+        const remoteInfo = await remoteDB.info();
+        log('Remote DB info: ' + JSON.stringify(remoteInfo));
+      } catch(e) {
+        log('ERROR connecting to remote: ' + e.message);
+        log('Status: ' + e.status);
+        return;
+      }
+
+      log('Pulling docs from Cloudant...');
+      try {
+        const result = await localDB.replicate.from(remoteDB);
+        log('Pull result: ' + JSON.stringify(result));
+        log('Docs read: ' + result.docs_read);
+        log('Docs written: ' + result.docs_written);
+      } catch(e) {
+        log('PULL ERROR: ' + e.message);
+        log('Status: ' + e.status);
+        log('Full error: ' + JSON.stringify(e));
+      }
+      log('Done.');
+    }
+
+    async function checkAfterPull() {
+      document.getElementById('log').textContent = '';
+      const db = new PouchDB('wardrobe_sync');
+      const info = await db.info();
+      log('DB info: ' + JSON.stringify(info));
+
+      const allDocs = await db.allDocs({ include_docs: false });
+      const types = {};
+      for (const row of allDocs.rows) {
+        const t = row.id.split(':')[0];
+        types[t] = (types[t] || 0) + 1;
+      }
+      log('Total docs: ' + allDocs.rows.length);
+      log('By type: ' + JSON.stringify(types));
+
+      // Try reading items like the app does
+      const items = await db.allDocs({
+        include_docs: true,
+        startkey: 'items:',
+        endkey: 'items:\ufff0'
+      });
+      log('Items query returned: ' + items.rows.length + ' rows');
+      if (items.rows.length > 0) {
+        log('First item: ' + JSON.stringify(items.rows[0].doc).substring(0, 200));
+      }
+      log('Done.');
+    }
+  </script>
+</body>
+</html>
