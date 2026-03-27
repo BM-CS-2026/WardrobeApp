@@ -131,6 +131,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (migrated) console.log('[App] Migration from old DB complete');
 
   await loadData();
+  document.title = 'Items:' + items.length + ' v27';
   await ensureBuiltInPalettes();
   setupTabs();
   renderCurrentTab();
