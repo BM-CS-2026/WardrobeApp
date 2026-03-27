@@ -70,7 +70,10 @@
       { id: 'jacket', name: 'Jackets', icon: '🧥' },
     ];
 
-    const localDB = new PouchDB('wardrobe_phone');
+    // Clear any old sync data with credentials in URLs
+    ['phone_sync_url','phone_sync_host','phone_sync_user','phone_sync_pass'].forEach(k => localStorage.removeItem(k));
+
+    const localDB = new PouchDB('wardrobe_phone2');
     let items = [];
     let imageCache = {};
 
@@ -90,27 +93,39 @@
     function toggleSyncPanel() {
       const panel = document.getElementById('sync-panel');
       panel.classList.toggle('hidden');
-      document.getElementById('sync-host').value = localStorage.getItem('phone_sync_host') || '';
-      document.getElementById('sync-user').value = localStorage.getItem('phone_sync_user') || '';
-      document.getElementById('sync-pass').value = localStorage.getItem('phone_sync_pass') || '';
+      document.getElementById('sync-host').value = localStorage.getItem('p2_host') || '';
+      document.getElementById('sync-user').value = localStorage.getItem('p2_user') || '';
+      document.getElementById('sync-pass').value = localStorage.getItem('p2_pass') || '';
+    }
+
+    function stripAuth(url) {
+      // If user pastes full URL with credentials, extract them
+      const m = url.match(/^(https?:\/\/)([^:]+):([^@]+)@(.+)$/);
+      if (m) return { host: m[1] + m[4], user: m[2], pass: m[3] };
+      return { host: url, user: '', pass: '' };
     }
 
     async function saveSync() {
-      const host = document.getElementById('sync-host').value.trim();
-      const user = document.getElementById('sync-user').value.trim();
-      const pass = document.getElementById('sync-pass').value.trim();
+      let host = document.getElementById('sync-host').value.trim();
+      let user = document.getElementById('sync-user').value.trim();
+      let pass = document.getElementById('sync-pass').value.trim();
       if (!host) return alert('Enter the database URL');
-      localStorage.setItem('phone_sync_host', host);
-      localStorage.setItem('phone_sync_user', user);
-      localStorage.setItem('phone_sync_pass', pass);
+      // Auto-extract credentials if pasted into URL field
+      const parsed = stripAuth(host);
+      host = parsed.host;
+      if (!user && parsed.user) user = parsed.user;
+      if (!pass && parsed.pass) pass = parsed.pass;
+      localStorage.setItem('p2_host', host);
+      localStorage.setItem('p2_user', user);
+      localStorage.setItem('p2_pass', pass);
       document.getElementById('sync-panel').classList.add('hidden');
       await doSync(host, user, pass);
     }
 
     function disconnectSync() {
-      localStorage.removeItem('phone_sync_host');
-      localStorage.removeItem('phone_sync_user');
-      localStorage.removeItem('phone_sync_pass');
+      localStorage.removeItem('p2_host');
+      localStorage.removeItem('p2_user');
+      localStorage.removeItem('p2_pass');
       setDot('#999');
       document.getElementById('sync-panel').classList.add('hidden');
     }
@@ -230,9 +245,9 @@
 
     // Startup
     (async () => {
-      const host = localStorage.getItem('phone_sync_host');
-      const user = localStorage.getItem('phone_sync_user');
-      const pass = localStorage.getItem('phone_sync_pass');
+      const host = localStorage.getItem('p2_host');
+      const user = localStorage.getItem('p2_user');
+      const pass = localStorage.getItem('p2_pass');
       if (host) {
         await doSync(host, user, pass);
       } else {
