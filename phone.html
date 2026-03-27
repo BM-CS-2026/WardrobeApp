@@ -52,8 +52,10 @@
   <div class="sync-panel hidden" id="sync-panel" onclick="if(event.target===this)toggleSyncPanel()">
     <div class="sync-sheet">
       <h2 style="margin-bottom:8px">Cloud Sync</h2>
-      <p style="font-size:12px;color:#888;margin-bottom:8px">Paste your Cloudant sync URL</p>
-      <input id="sync-url" type="url" placeholder="https://...">
+      <p style="font-size:12px;color:#888;margin-bottom:8px">Enter your Cloudant details</p>
+      <input id="sync-host" type="url" placeholder="https://...cloudant.../wardrobe" style="font-size:12px">
+      <input id="sync-user" type="text" placeholder="Username (apikey-v2-...)" style="font-size:12px">
+      <input id="sync-pass" type="password" placeholder="Password" style="font-size:12px">
       <button class="btn-primary" onclick="saveSync()">Save & Sync</button>
       <button class="btn-danger" onclick="disconnectSync()" style="margin-top:4px">Disconnect</button>
     </div>
@@ -88,48 +90,44 @@
     function toggleSyncPanel() {
       const panel = document.getElementById('sync-panel');
       panel.classList.toggle('hidden');
-      document.getElementById('sync-url').value = localStorage.getItem('phone_sync_url') || '';
+      document.getElementById('sync-host').value = localStorage.getItem('phone_sync_host') || '';
+      document.getElementById('sync-user').value = localStorage.getItem('phone_sync_user') || '';
+      document.getElementById('sync-pass').value = localStorage.getItem('phone_sync_pass') || '';
     }
 
     async function saveSync() {
-      const url = document.getElementById('sync-url').value.trim();
-      if (!url) return alert('Enter a URL');
-      localStorage.setItem('phone_sync_url', url);
+      const host = document.getElementById('sync-host').value.trim();
+      const user = document.getElementById('sync-user').value.trim();
+      const pass = document.getElementById('sync-pass').value.trim();
+      if (!host) return alert('Enter the database URL');
+      localStorage.setItem('phone_sync_host', host);
+      localStorage.setItem('phone_sync_user', user);
+      localStorage.setItem('phone_sync_pass', pass);
       document.getElementById('sync-panel').classList.add('hidden');
-      await doSync(url);
+      await doSync(host, user, pass);
     }
 
     function disconnectSync() {
-      localStorage.removeItem('phone_sync_url');
+      localStorage.removeItem('phone_sync_host');
+      localStorage.removeItem('phone_sync_user');
+      localStorage.removeItem('phone_sync_pass');
       setDot('#999');
       document.getElementById('sync-panel').classList.add('hidden');
     }
 
-    function parseAuthUrl(url) {
-      // Extract credentials from https://user:pass@host/db format
-      const match = url.match(/^(https?:\/\/)([^:]+):([^@]+)@(.+)$/);
-      if (match) {
-        return {
-          url: match[1] + match[4],
-          auth: { username: decodeURIComponent(match[2]), password: decodeURIComponent(match[3]) }
-        };
-      }
-      return { url: url, auth: null };
-    }
-
-    async function doSync(url) {
+    async function doSync(host, user, pass) {
       showLoad('Connecting...');
       setDot('#2196F3');
       try {
-        const parsed = parseAuthUrl(url);
         const opts = {};
-        if (parsed.auth) {
+        if (user && pass) {
+          const basicAuth = btoa(user + ':' + pass);
           opts.fetch = function(fetchUrl, fetchOpts) {
-            fetchOpts.headers.set('Authorization', 'Basic ' + btoa(parsed.auth.username + ':' + parsed.auth.password));
+            fetchOpts.headers.set('Authorization', 'Basic ' + basicAuth);
             return PouchDB.fetch(fetchUrl, fetchOpts);
           };
         }
-        const remote = new PouchDB(parsed.url, opts);
+        const remote = new PouchDB(host, opts);
         const info = await remote.info();
         showLoad('Syncing 0/' + info.doc_count + ' docs...');
 
@@ -216,9 +214,11 @@
 
     // Startup
     (async () => {
-      const url = localStorage.getItem('phone_sync_url');
-      if (url) {
-        await doSync(url);
+      const host = localStorage.getItem('phone_sync_host');
+      const user = localStorage.getItem('phone_sync_user');
+      const pass = localStorage.getItem('phone_sync_pass');
+      if (host) {
+        await doSync(host, user, pass);
       } else {
         // Just load local data
         await loadAndRender();
