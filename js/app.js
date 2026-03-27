@@ -198,12 +198,23 @@ app.showSyncSettings = () => {
   `);
 };
 
-app.saveSyncUrl = () => {
+app.saveSyncUrl = async () => {
   const url = document.getElementById('sync-url-input')?.value?.trim();
   if (!url) { alert('Please enter a URL.'); return; }
   db.setSyncUrl(url);
   db.stopSync();
   closeSheet();
+  showLoading('Syncing data...');
+  try {
+    await db.pullOnce(url, (info) => {
+      document.getElementById('loading-msg').textContent = `Syncing... ${info.docs_written} docs`;
+    });
+  } catch (e) {
+    console.warn('[Sync] Pull failed:', e);
+  }
+  await loadData();
+  hideLoading();
+  renderCurrentTab();
   startSyncIfConfigured();
 };
 
