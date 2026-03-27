@@ -115,29 +115,45 @@
       document.getElementById('sync-panel').classList.add('hidden');
     }
 
+    async function cloudFetch(host, user, pass, path) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (user && pass) headers['Authorization'] = 'Basic ' + btoa(user + ':' + pass);
+      const resp = await fetch(host + (path || ''), { headers });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    }
+
     async function doSync(host, user, pass) {
       showLoad('Connecting...');
       setDot('#2196F3');
       try {
-        const opts = {};
-        if (user && pass) {
-          const basicAuth = btoa(user + ':' + pass);
-          opts.fetch = function(fetchUrl, fetchOpts) {
-            fetchOpts.headers.set('Authorization', 'Basic ' + basicAuth);
-            return PouchDB.fetch(fetchUrl, fetchOpts);
-          };
-        }
-        const remote = new PouchDB(host, opts);
-        const info = await remote.info();
-        showLoad('Syncing 0/' + info.doc_count + ' docs...');
+        // Get database info
+        const info = await cloudFetch(host, user, pass, '');
+        const total = info.doc_count;
+        showLoad('Syncing 0/' + total + ' docs...');
 
-        let written = 0;
-        await localDB.replicate.from(remote, { batch_size: 20 })
-          .on('change', (ch) => {
-            written += ch.docs.length;
-            document.getElementById('loading-msg').textContent =
-              'Syncing ' + written + '/' + info.doc_count + ' docs...';
-          });
+        // Fetch all docs in batches
+        let skip = 0, written = 0;
+        const batchSize = 25;
+        while (skip < total + batchSize) {
+          const batch = await cloudFetch(host, user, pass,
+            '/_all_docs?include_docs=true&limit=' + batchSize + '&skip=' + skip);
+          if (!batch.rows || batch.rows.length === 0) break;
+
+          for (const row of batch.rows) {
+            const doc = row.doc;
+            if (!doc || doc._id.startsWith('_design/')) continue;
+            const { _rev, ...cleanDoc } = doc;
+            try {
+              const existing = await localDB.get(doc._id).catch(() => null);
+              if (existing) cleanDoc._rev = existing._rev;
+              await localDB.put(cleanDoc);
+              written++;
+            } catch (e) { /* skip conflicts */ }
+          }
+          skip += batchSize;
+          showLoad('Syncing ' + written + '/' + total + ' docs...');
+        }
 
         setDot('#4CAF50');
         showLoad('Loading wardrobe...');
