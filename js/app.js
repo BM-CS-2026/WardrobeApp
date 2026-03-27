@@ -168,8 +168,8 @@ function startSyncIfConfigured() {
   if (!url) { setSyncDot('off'); return; }
   db.setupSync(url, async (event, info) => {
     setSyncDot(event === 'error' ? 'error' : event);
-    if (event === 'change') {
-      // Remote changes arrived — reload data and re-render
+    if (event === 'change' || event === 'paused') {
+      // Reload data on change and when sync catches up
       await loadData();
       renderCurrentTab();
     }

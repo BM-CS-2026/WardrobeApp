@@ -25,7 +25,7 @@
 
     // Clear old caches on version change (service worker handles this too)
     if ('serviceWorker' in navigator) {
-      caches.keys().then(keys => keys.filter(k => k !== 'wardrobe-v25').forEach(k => caches.delete(k)));
+      caches.keys().then(keys => keys.filter(k => k !== 'wardrobe-v26').forEach(k => caches.delete(k)));
     }
   </script>
 </head>
