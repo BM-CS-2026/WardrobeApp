@@ -222,9 +222,14 @@ export function setSyncUrl(url) {
   else localStorage.removeItem('sync_remote_url');
 }
 
-export async function pullOnce(remoteUrl) {
+export function pullOnce(remoteUrl, onProgress) {
   const remote = new PouchDB(remoteUrl);
-  return db.replicate.from(remote);
+  return new Promise((resolve, reject) => {
+    db.replicate.from(remote, { batch_size: 25 })
+      .on('change', (info) => { if (onProgress) onProgress(info); })
+      .on('complete', (info) => resolve(info))
+      .on('error', (err) => reject(err));
+  });
 }
 
 export function setupSync(remoteUrl, onChange) {

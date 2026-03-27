@@ -130,23 +130,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   if (migrated) console.log('[App] Migration from old DB complete');
 
+  // Sync first if configured (pull remote data before rendering)
+  const syncUrl = db.getSyncUrl();
+  if (syncUrl) {
+    showLoading('Syncing data...');
+    try {
+      await db.pullOnce(syncUrl, (info) => {
+        document.getElementById('loading-msg').textContent = `Syncing... ${info.docs_written} docs`;
+      });
+    } catch (e) {
+      console.warn('[Sync] Initial pull failed:', e);
+    }
+    hideLoading();
+  }
+
   await loadData();
-  document.title = 'Items:' + items.length + ' v27';
   await ensureBuiltInPalettes();
   setupTabs();
   renderCurrentTab();
 
-  // Repair any old attachment-based images
-  const repaired = await db.repairImages((done, total) => {
-    if (done === 1) showLoading('Repairing images...');
-    document.getElementById('loading-msg').textContent = `Repairing images... ${done}/${total}`;
-  });
-  if (repaired > 0) {
-    hideLoading();
-    renderCurrentTab();
-  }
-
-  // Auto-start sync if configured
+  // Start live sync for ongoing changes
   startSyncIfConfigured();
 
   // Wire up persistent file inputs
@@ -164,21 +167,9 @@ function setSyncDot(state) {
   dot.title = state === 'paused' ? 'Synced' : state === 'active' ? 'Syncing...' : state === 'error' ? 'Sync error' : 'Sync not configured';
 }
 
-async function startSyncIfConfigured() {
+function startSyncIfConfigured() {
   const url = db.getSyncUrl();
   if (!url) { setSyncDot('off'); return; }
-
-  // Do an initial one-time pull first to get all remote data
-  setSyncDot('active');
-  try {
-    await db.pullOnce(url);
-    await loadData();
-    renderCurrentTab();
-  } catch (e) {
-    console.warn('[Sync] Initial pull failed:', e);
-  }
-
-  // Then start live sync for ongoing changes
   db.setupSync(url, async (event, info) => {
     setSyncDot(event === 'error' ? 'error' : event);
     if (event === 'change' || event === 'paused') {
@@ -186,6 +177,7 @@ async function startSyncIfConfigured() {
       renderCurrentTab();
     }
   });
+  setSyncDot('active');
 }
 
 app.showSyncSettings = () => {
