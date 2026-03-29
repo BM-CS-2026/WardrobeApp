@@ -234,24 +234,37 @@ export function setSyncUrl(url) {
 function makeRemoteDB(remoteUrl) {
   // PouchDB 8+ rejects URLs with embedded credentials
   // Parse them out and pass via fetch headers
+  const cleanUrl = (remoteUrl || '').replace(/\s+/g, '');
   try {
-    const parsed = new URL(remoteUrl);
+    const parsed = new URL(cleanUrl);
     if (parsed.username) {
-      const creds = btoa(`${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`);
+      const user = decodeURIComponent(parsed.username);
+      const pass = decodeURIComponent(parsed.password);
+      const creds = btoa(user + ':' + pass);
       parsed.username = '';
       parsed.password = '';
-      return new PouchDB(parsed.toString(), {
-        fetch: (url, opts) => {
-          opts = opts || {};
-          opts.headers = opts.headers || new Headers();
-          if (opts.headers.set) opts.headers.set('Authorization', 'Basic ' + creds);
-          else opts.headers['Authorization'] = 'Basic ' + creds;
-          return PouchDB.fetch(url, opts);
+      const baseUrl = parsed.toString();
+      console.log('[Sync] makeRemoteDB:', baseUrl.substring(0, 40) + '...');
+      return new PouchDB(baseUrl, {
+        fetch: function(fetchUrl, fetchOpts) {
+          fetchOpts = fetchOpts || {};
+          // Ensure headers is a plain object for maximum compatibility
+          if (!fetchOpts.headers) {
+            fetchOpts.headers = {};
+          }
+          if (fetchOpts.headers instanceof Headers) {
+            fetchOpts.headers.set('Authorization', 'Basic ' + creds);
+          } else {
+            fetchOpts.headers['Authorization'] = 'Basic ' + creds;
+          }
+          return PouchDB.fetch(fetchUrl, fetchOpts);
         }
       });
     }
-  } catch (e) {}
-  return new PouchDB(remoteUrl);
+  } catch (e) {
+    console.error('[Sync] makeRemoteDB parse error:', e);
+  }
+  return new PouchDB(cleanUrl);
 }
 
 export function pullOnce(remoteUrl, onProgress) {

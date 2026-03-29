@@ -1,4 +1,4 @@
-import * as db from './db30.js?v=37';
+import * as db from './db30.js?v=39';
 import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=20';
 import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=20';
 import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=20';
@@ -383,7 +383,7 @@ app.forceResync = async () => {
     alert(`Sync complete! Pulled ${result.docs_written} docs. Now showing ${items.length} items.`);
   } catch (e) {
     hideLoading();
-    alert('Sync failed: ' + e.message);
+    alert('Sync failed: ' + (e.message || JSON.stringify(e)) + '\n\nURL: ' + url.substring(0, 40) + '...');
   }
 };
 
