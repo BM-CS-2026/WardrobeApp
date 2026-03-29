@@ -58,15 +58,17 @@ export async function extractColorProfile(imageSource) {
 }
 
 // Crop to bounding box — zooms in on the item, centered, no background removal
-export async function extractFromRegion(imageSource, box) {
+export async function extractFromRegion(imageSource, box, category = null) {
   const img = await loadImageElement(imageSource);
 
-  // Add a small padding around the bounding box so the item isn't edge-to-edge
-  const pad = 0.02;
-  const bx = Math.max(0, box.x - pad);
-  const by = Math.max(0, box.y - pad);
-  const bw = Math.min(1 - bx, box.width + pad * 2);
-  const bh = Math.min(1 - by, box.height + pad * 2);
+  // Add padding around the bounding box — shoes and belts need more padding to avoid cutting
+  const needsExtraPad = category === 'shoes' || category === 'belt';
+  const padX = needsExtraPad ? 0.05 : 0.02;
+  const padY = needsExtraPad ? 0.08 : 0.02;
+  const bx = Math.max(0, box.x - padX);
+  const by = Math.max(0, box.y - padY);
+  const bw = Math.min(1 - bx, box.width + padX * 2);
+  const bh = Math.min(1 - by, box.height + padY * 2);
 
   const sx = Math.round(bx * img.width);
   const sy = Math.round(by * img.height);

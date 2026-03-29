@@ -41,8 +41,8 @@ export function generateOutfits(allItems, palette, seedItem = null) {
   }
   for (const cat of optional) {
     const catItems = buckets[cat.id] || [];
-    if (cat.id === 'belt' && catItems.length > 0) {
-      // Favor belts: put items first so they're more likely picked before null
+    if ((cat.id === 'belt' || cat.id === 'shoes') && catItems.length > 0) {
+      // Favor belts and shoes: put items first so they're included in most outfits
       slots.push([...catItems, null]);
     } else {
       slots.push([null, ...catItems]);

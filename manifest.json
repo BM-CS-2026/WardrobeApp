@@ -1,7 +1,7 @@
 {
-  "name": "WardrobeApp",
-  "short_name": "Wardrobe",
-  "description": "Personal wardrobe manager with color-based outfit suggestions",
+  "name": "My Style",
+  "short_name": "My Style",
+  "description": "Your personal style assistant — wardrobe, outfits & color harmony",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#ffffff",

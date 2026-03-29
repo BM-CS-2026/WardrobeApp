@@ -13,6 +13,93 @@ let currentTab = 'wardrobe';
 let items = [];
 let palettes = [];
 let outfits = [];
+let wishlist = []; // Wish List items
+
+// ── Undo System ──
+const undoStack = []; // { type, data }
+const MAX_UNDO = 20;
+
+function pushUndo(action) {
+  undoStack.push(action);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+}
+
+app.undoLast = async () => {
+  if (!undoStack.length) {
+    openSheet(`
+      <h2>Undo</h2>
+      <p style="color:var(--text-secondary);margin-bottom:16px">Nothing to undo.</p>
+      <button class="btn btn-secondary" onclick="closeSheet()">OK</button>
+    `);
+    return;
+  }
+
+  const action = undoStack.pop();
+  showLoading('Undoing...');
+
+  try {
+    if (action.type === 'delete-item') {
+      // Restore deleted item
+      await db.putItem(action.item);
+      if (action.imageData && action.item.imageId) {
+        await db.saveImage(action.item.imageId, dataUrlToBlob(action.imageData));
+      }
+      items.push(action.item);
+    } else if (action.type === 'delete-items') {
+      // Restore multiple deleted items
+      for (const entry of action.entries) {
+        await db.putItem(entry.item);
+        if (entry.imageData && entry.item.imageId) {
+          await db.saveImage(entry.item.imageId, dataUrlToBlob(entry.imageData));
+        }
+        items.push(entry.item);
+      }
+    } else if (action.type === 'add-items') {
+      // Remove added items
+      for (const id of action.itemIds) {
+        const item = items.find(i => i.id === id);
+        if (item?.imageId) await db.deleteImage(item.imageId);
+        await db.deleteItem(id);
+        items = items.filter(i => i.id !== id);
+      }
+    } else if (action.type === 'delete-outfit') {
+      await db.putOutfit(action.outfit);
+      outfits.push(action.outfit);
+    } else if (action.type === 'add-outfits') {
+      for (const id of action.outfitIds) {
+        await db.deleteOutfit(id);
+        outfits = outfits.filter(o => o.id !== id);
+      }
+    } else if (action.type === 'edit-item') {
+      const item = items.find(i => i.id === action.itemId);
+      if (item) {
+        Object.assign(item, action.oldData);
+        await db.putItem(item);
+      }
+    }
+
+    hideLoading();
+    await loadData();
+    renderCurrentTab();
+    openSheet(`
+      <h2>Undone</h2>
+      <p style="color:var(--text-secondary);margin-bottom:16px">${action.description || 'Last action undone.'}</p>
+      <button class="btn btn-secondary" onclick="closeSheet()">OK</button>
+    `);
+  } catch (e) {
+    hideLoading();
+    alert('Undo failed: ' + e.message);
+  }
+};
+
+function dataUrlToBlob(dataUrl) {
+  const parts = dataUrl.split(',');
+  const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+  const raw = atob(parts[1]);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
 
 // ── AI Outfit Image Generation ──
 function outfitImageCacheKey(itemIds) {
@@ -145,6 +232,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     hideLoading();
   }
 
+  // Auto-repair broken images (wrong field names, etc.)
+  const repaired = await db.repairImages();
+  if (repaired) console.log(`[App] Repaired ${repaired} images`);
+
   await loadData();
   await ensureBuiltInPalettes();
   setupTabs();
@@ -232,6 +323,11 @@ async function loadData() {
     db.getAllPalettes(),
     db.getAllOutfits(),
   ]);
+  wishlist = (await db.getSetting('wishlist')) || [];
+}
+
+async function saveWishlist() {
+  await db.putSetting('wishlist', wishlist);
 }
 
 async function ensureBuiltInPalettes() {
@@ -285,9 +381,7 @@ function renderWardrobe() {
       <h1>Wardrobe</h1>
       <div style="display:flex;gap:8px">
         ${items.length > 0 ? `<button class="btn-icon" onclick="app.toggleSelectMode()" title="Select items" style="font-size:16px;${selectMode ? 'background:var(--accent);color:white' : ''}">${selectMode ? '✕' : '☑'}</button>` : ''}
-        ${items.length > 0 ? `<button class="btn-icon" onclick="app.reanalyzeAll()" title="Re-analyze items" style="font-size:16px">🔄</button>` : ''}
-        ${items.length > 0 ? `<button class="btn-icon" onclick="app.exportWardrobe()" title="Export" style="font-size:16px">📤</button>` : ''}
-        <button class="btn-icon" onclick="app.showImportWardrobe()" title="Import" style="font-size:16px">📥</button>
+        <button class="btn-icon" onclick="app.undoLast()" title="Undo last action" style="font-size:16px">↩️</button>
         <button class="btn-icon" onclick="app.startCreateOutfit()" title="Create Outfit" style="font-size:16px">✨</button>
         <button class="btn-icon" onclick="app.showAddFlow()">+</button>
       </div>
@@ -423,8 +517,10 @@ app.handlePhotos = async (input) => {
         let croppedBlob = null;
         let profile = null;
 
+        const category = CATEGORIES.find(c => c.id === garment.category)?.id || 'shirt';
+
         if (garment.boundingBox) {
-          const result = await extractFromRegion(files[i], garment.boundingBox);
+          const result = await extractFromRegion(files[i], garment.boundingBox, category);
           croppedBlob = result.croppedBlob;
           profile = result.profile;
         } else {
@@ -434,8 +530,6 @@ app.handlePhotos = async (input) => {
 
         const imageId = generateId();
         await db.saveImage(imageId, croppedBlob);
-
-        const category = CATEGORIES.find(c => c.id === garment.category)?.id || 'shirt';
 
         const item = createClothingItem({
           name: garment.description || `${category} ${items.length + 1}`,
@@ -595,14 +689,21 @@ app.toggleItemSelection = (id) => {
 app.deleteSelected = async () => {
   const count = selectedItems.size;
   if (!count) return;
-  if (!confirm(`Delete ${count} selected item${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+  if (!confirm(`Delete ${count} selected item${count > 1 ? 's' : ''}?`)) return;
 
   showLoading(`Deleting ${count} items...`);
+  const entries = [];
   for (const id of selectedItems) {
     const item = items.find(i => i.id === id);
-    if (item?.imageId) await db.deleteImage(item.imageId).catch(() => {});
+    let imageData = null;
+    if (item?.imageId) {
+      imageData = await db.loadImage(item.imageId);
+      await db.deleteImage(item.imageId).catch(() => {});
+    }
+    entries.push({ item: { ...item }, imageData });
     await db.deleteItem(id);
   }
+  pushUndo({ type: 'delete-items', entries, description: `Restored ${count} deleted items` });
   items = items.filter(i => !selectedItems.has(i.id));
   selectedItems.clear();
   selectMode = false;
@@ -716,6 +817,33 @@ app.doImportWardrobe = async () => {
 // ── RE-ANALYZE ALL ITEMS ──
 // ══════════════════════════════════════
 
+app.removeAllBackgrounds = async () => {
+  const withImages = items.filter(i => i.imageId);
+  if (!withImages.length) return;
+  if (!confirm(`Remove backgrounds from ${withImages.length} items?`)) return;
+  showLoading('Removing backgrounds...');
+  let done = 0;
+  for (const item of withImages) {
+    done++;
+    document.getElementById('loading-msg').textContent = `Removing background ${done}/${withImages.length}...`;
+    try {
+      const imgData = await db.loadImage(item.imageId);
+      if (!imgData) continue;
+      let blob;
+      if (typeof imgData === 'string') {
+        const resp = await fetch(imgData);
+        blob = await resp.blob();
+      } else {
+        blob = imgData;
+      }
+      const noBg = await removeBackground(blob);
+      await db.saveImage(item.imageId, noBg);
+    } catch (e) { console.warn('BG removal failed for', item.id, e); }
+  }
+  hideLoading();
+  renderCurrentTab();
+};
+
 app.reanalyzeAll = async () => {
   const apiKey = await db.getApiKey();
   if (!apiKey) {
@@ -785,7 +913,7 @@ async function runReanalysis(apiKey) {
         const isSmallCrop = b && (b.width < 0.85 || b.height < 0.85);
 
         if (isSmallCrop) {
-          const result = await extractFromRegion(blob, b);
+          const result = await extractFromRegion(blob, b, newCat);
           const newImageId = generateId();
           await db.saveImage(newImageId, result.croppedBlob);
 
@@ -816,7 +944,7 @@ async function runReanalysis(apiKey) {
           let profile = null;
 
           if (g.boundingBox) {
-            const result = await extractFromRegion(blob, g.boundingBox);
+            const result = await extractFromRegion(blob, g.boundingBox, cat);
             croppedBlob = result.croppedBlob;
             profile = result.profile;
           } else {
@@ -932,6 +1060,7 @@ async function showGeneratedOutfitsSheet(results, seedItems, vibe) {
       <p style="font-size:11px;color:var(--text-secondary);margin-top:4px">You can close this and keep working — images will appear in Outfits tab</p>
     </div>
     <button class="btn btn-secondary" style="margin-top:8px" onclick="app.closeSheetAndRender()">Close & Continue in Background</button>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet(); showOutfitStep2()">‹ Back to Vibe Selection</button>
   `);
   lazyLoadImages();
 
@@ -1006,40 +1135,52 @@ app.showGenOutfitDetail = (idx) => {
   const r = app._genResults[idx];
   if (!r) return;
   const cacheKey = outfitImageCacheKey(r.items.map(i => i.id));
+  // Find matching saved outfit for wishlist
+  const savedOutfit = outfits.find(o => outfitImageCacheKey(o.itemIds) === cacheKey);
+  const isInWishlist = savedOutfit && wishlist.some(w => w.outfitId === savedOutfit.id);
+
+  const colorExpl = r.colorScore >= 0.7 ? 'Colors work very well together' : r.colorScore >= 0.4 ? 'Colors are acceptable but could improve' : 'Colors don\'t match well';
+  const compExpl = r.completenessScore >= 0.7 ? 'Has all key pieces' : r.completenessScore >= 0.4 ? 'Missing some optional pieces' : 'Missing essential items';
+  const styleExpl = r.styleScore >= 0.7 ? 'Consistent style direction' : r.styleScore >= 0.4 ? 'Mixed styles' : 'Conflicting styles';
+
   closeSheet();
   openSheet(`
-    <h2>Outfit Detail</h2>
-    <div class="outfit-side-by-side">
-      <div class="outfit-side-ai">
-        <img data-ai-cache-key="${cacheKey}" class="lazy-ai-cache" style="width:100%;border-radius:var(--radius);background:var(--bg)">
-      </div>
-      <div class="outfit-side-items">
-        ${r.items.map(item => {
-          const cat = CATEGORIES.find(c => c.id === item.category);
-          return `
-            <div class="item-row" style="padding:6px 8px;margin-bottom:4px">
-              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:40px;height:40px;border-radius:6px">` :
-                `<div style="width:40px;height:40px;border-radius:6px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:14px">${cat?.icon || ''}</div>`}
-              <div class="item-info" style="min-width:0">
-                <div class="name" style="font-size:12px">${esc(item.name)}</div>
-                <div class="cat" style="font-size:10px">${cat?.name || ''}</div>
-              </div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    </div>
+    <h2>Outfit #${idx + 1}</h2>
+    <img data-ai-cache-key="${cacheKey}" class="lazy-ai-cache" style="width:100%;max-height:350px;object-fit:contain;border-radius:var(--radius);background:var(--bg);margin-bottom:12px">
+
+    <div class="section-title">Items</div>
+    ${r.items.map(item => {
+      const cat = CATEGORIES.find(c => c.id === item.category);
+      return `
+        <div class="item-row" style="padding:6px 8px;margin-bottom:4px;cursor:pointer" onclick="closeSheet(); app.showItemDetail('${item.id}')">
+          ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:50px;height:50px;border-radius:6px">` :
+            `<div style="width:50px;height:50px;border-radius:6px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:14px">${cat?.icon || ''}</div>`}
+          <div class="item-info" style="min-width:0">
+            <div class="name" style="font-size:13px">${esc(item.name)}</div>
+            <div class="cat" style="font-size:11px">${cat?.name || ''}</div>
+          </div>
+        </div>
+      `;
+    }).join('')}
+
+    ${savedOutfit ? `<button class="btn ${isInWishlist ? 'btn-secondary' : 'btn-outline'}" style="margin-top:10px" onclick="app.toggleWishlist('${savedOutfit.id}'); app.showGenOutfitDetail(${idx})">
+      ${isInWishlist ? '✓ In Wish List' : '🛒 Wish List'}
+    </button>` : ''}
+
     <div class="divider"></div>
     <div class="score-row"><span class="label">Color Match</span><span class="value ${scoreColor(r.colorScore)}">${Math.round(r.colorScore * 100)}%</span></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${colorExpl}</div>
     <div class="score-row"><span class="label">Completeness</span><span class="value ${scoreColor(r.completenessScore)}">${Math.round(r.completenessScore * 100)}%</span></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${compExpl}</div>
     <div class="score-row"><span class="label">Style Harmony</span><span class="value ${scoreColor(r.styleScore)}">${Math.round(r.styleScore * 100)}%</span></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${styleExpl}</div>
     <div class="divider"></div>
     <div class="score-row"><span class="label" style="font-weight:700">Overall</span><span class="value ${scoreColor(r.overallScore)}" style="font-weight:700">${Math.round(r.overallScore * 100)}%</span></div>
     <div class="palette-bar" style="margin:16px 0">
       ${r.items.filter(it => it.colorProfile).map(it => `<div style="background:${hslToCss(it.colorProfile.dominantColor)}"></div>`).join('')}
     </div>
     <div style="text-align:center;font-size:13px;color:var(--success);margin-bottom:8px">Auto-saved to Outfits</div>
-    <button class="btn btn-secondary" onclick="app.backToGenResults()">Back to Results</button>
+    <button class="btn btn-secondary" onclick="app.backToGenResults()">‹ Back to Results</button>
   `);
   lazyLoadImages();
 };
@@ -1093,6 +1234,8 @@ function hideLoading() {
 
 let outfitSeedItem = null;
 let outfitVibe = null;
+let outfitWeather = null;
+let outfitNoJeans = false;
 
 app._seedSelections = new Set();
 app._outfitGuidance = '';
@@ -1102,6 +1245,8 @@ app.startCreateOutfit = () => {
   app._outfitGuidance = '';
   outfitSeedItem = null;
   outfitVibe = null;
+  outfitWeather = null;
+  outfitNoJeans = false;
   showOutfitStep1();
 };
 
@@ -1214,16 +1359,16 @@ app.handleOutfitNewPhoto = async (input) => {
     let croppedBlob = file;
     let profile = await extractColorProfile(file);
 
+    const category = CATEGORIES.find(c => c.id === garment.category)?.id || 'shirt';
+
     if (garment.boundingBox) {
-      const result = await extractFromRegion(file, garment.boundingBox);
+      const result = await extractFromRegion(file, garment.boundingBox, category);
       croppedBlob = result.croppedBlob;
       profile = result.profile;
     }
 
     const imageId = generateId();
     await db.saveImage(imageId, croppedBlob);
-
-    const category = CATEGORIES.find(c => c.id === garment.category)?.id || 'shirt';
     const item = createClothingItem({
       name: garment.description || `${category}`,
       category,
@@ -1237,8 +1382,9 @@ app.handleOutfitNewPhoto = async (input) => {
     for (let i = 1; i < garments.length; i++) {
       const g = garments[i];
       let cb = file, pr = await extractColorProfile(file);
+      const gcat = CATEGORIES.find(c => c.id === g.category)?.id || 'shirt';
       if (g.boundingBox) {
-        const res = await extractFromRegion(file, g.boundingBox);
+        const res = await extractFromRegion(file, g.boundingBox, gcat);
         cb = res.croppedBlob;
         pr = res.profile;
       }
@@ -1271,6 +1417,15 @@ app.pickExistingItem = (id) => {
 function showOutfitStep2() {
   const seeds = Array.isArray(outfitSeedItem) ? outfitSeedItem : (outfitSeedItem ? [outfitSeedItem] : []);
 
+  const WEATHERS = [
+    { id: 'hot', name: 'Hot', icon: '☀️' },
+    { id: 'warm', name: 'Warm', icon: '🌤️' },
+    { id: 'mild', name: 'Mild', icon: '⛅' },
+    { id: 'cool', name: 'Cool', icon: '🌥️' },
+    { id: 'cold', name: 'Cold', icon: '❄️' },
+    { id: 'rainy', name: 'Rainy', icon: '🌧️' },
+  ];
+
   openSheet(`
     <h2>Choose a Vibe</h2>
     ${seeds.map(seed => {
@@ -1285,7 +1440,6 @@ function showOutfitStep2() {
         ${seed?.colorProfile ? `<div class="swatch md" style="background:${hslToCss(seed.colorProfile.dominantColor)}"></div>` : ''}
       </div>`;
     }).join('')}
-    ${app._outfitGuidance ? `<div style="padding:8px 10px;background:var(--accent-light);border-radius:8px;font-size:12px;color:var(--accent);margin-bottom:8px">${esc(app._outfitGuidance)}</div>` : ''}
 
     <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">What's the occasion?</p>
     <div class="vibe-grid">
@@ -1297,23 +1451,67 @@ function showOutfitStep2() {
       `).join('')}
     </div>
 
-    <button class="btn btn-primary" style="margin-top:20px" id="generate-btn" onclick="app.runVibeOutfitGen()" ${!outfitVibe ? 'disabled' : ''}>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;margin-top:20px">What's the weather?</p>
+    <div class="weather-grid">
+      ${WEATHERS.map(w => `
+        <div class="weather-chip ${outfitWeather === w.id ? 'selected' : ''}" onclick="app.selectWeather('${w.id}')">
+          <span class="weather-icon">${w.icon}</span>
+          <span class="weather-name">${w.name}</span>
+        </div>
+      `).join('')}
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-top:16px;padding:10px 12px;background:var(--bg);border-radius:var(--radius-sm)">
+      <label style="flex:1;font-size:14px;font-weight:600;cursor:pointer" for="no-jeans-toggle">No jeans</label>
+      <div class="toggle-switch ${outfitNoJeans ? 'on' : ''}" onclick="app.toggleNoJeans()">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-top:16px">
+      <label>Additional notes (optional)</label>
+      <input id="outfit-extra-text" type="text" placeholder="e.g. meeting with client, outdoor dinner..." value="${esc(app._outfitGuidance)}" oninput="app._outfitGuidance = this.value">
+    </div>
+
+    <button class="btn btn-primary" style="margin-top:12px" id="generate-btn" onclick="app.runVibeOutfitGen()" ${!outfitVibe ? 'disabled' : ''}>
       ✨ Generate Outfits
     </button>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet(); showOutfitStep1()">‹ Back</button>
   `);
   lazyLoadImages();
 }
 
 app.selectVibe = (vibeId) => {
   outfitVibe = vibeId;
-  // Re-render to show selected state
-  showOutfitStep2();
+  // Update UI in-place instead of full re-render
+  document.querySelectorAll('.vibe-card').forEach(card => {
+    card.classList.toggle('selected', card.getAttribute('onclick')?.includes(`'${vibeId}'`));
+  });
+  const btn = document.getElementById('generate-btn');
+  if (btn) btn.disabled = false;
+};
+
+app.selectWeather = (weatherId) => {
+  outfitWeather = outfitWeather === weatherId ? null : weatherId;
+  document.querySelectorAll('.weather-chip').forEach(chip => {
+    chip.classList.toggle('selected', chip.getAttribute('onclick')?.includes(`'${weatherId}'`) && outfitWeather === weatherId);
+  });
+};
+
+app.toggleNoJeans = () => {
+  outfitNoJeans = !outfitNoJeans;
+  const toggle = document.querySelector('.toggle-switch');
+  if (toggle) toggle.classList.toggle('on', outfitNoJeans);
 };
 
 app.runVibeOutfitGen = () => {
   if (!outfitSeedItem || !outfitVibe) return;
   const vibe = VIBES.find(v => v.id === outfitVibe);
   if (!vibe) return;
+
+  // Capture free text before closing
+  const el = document.getElementById('outfit-extra-text');
+  if (el) app._outfitGuidance = el.value;
 
   closeSheet();
   showLoading('Generating outfits...');
@@ -1323,14 +1521,35 @@ app.runVibeOutfitGen = () => {
   setTimeout(() => {
     const vibePalette = { id: 'vibe-temp', name: vibe.name, colors: vibe.colors, harmonyType: 'analogous', isBuiltIn: false };
 
-    // Filter items by guidance (e.g. "no jeans" removes jeans)
+    // Filter items by guidance and preferences
     let filteredItems = items;
+
+    // No jeans toggle
+    if (outfitNoJeans) {
+      filteredItems = filteredItems.filter(item => {
+        const name = item.name.toLowerCase();
+        return !name.includes('jeans') && !name.includes('denim');
+      });
+    }
+
+    // Weather filtering — exclude heavy layers in hot weather, light items in cold
+    if (outfitWeather === 'hot' || outfitWeather === 'warm') {
+      filteredItems = filteredItems.filter(item => {
+        const name = item.name.toLowerCase();
+        return !name.includes('wool') && !name.includes('heavy') && !name.includes('parka') && !name.includes('down jacket');
+      });
+    }
+    if (outfitWeather === 'cold') {
+      // Favor jackets — don't exclude them
+    }
+
+    // Text guidance exclusions
     const guidance = (app._outfitGuidance || '').toLowerCase().trim();
     if (guidance) {
       const noMatches = guidance.match(/no\s+(\w+)/gi) || [];
       const excludeTerms = noMatches.map(m => m.replace(/^no\s+/i, '').toLowerCase());
       if (excludeTerms.length) {
-        filteredItems = items.filter(item => {
+        filteredItems = filteredItems.filter(item => {
           const name = item.name.toLowerCase();
           return !excludeTerms.some(term => name.includes(term));
         });
@@ -1370,8 +1589,9 @@ app.showItemDetail = async (id) => {
   const cp = item.colorProfile;
   openDetail(`
     <div class="detail-header">
-      <button class="back-btn" onclick="app.closeDetail()">‹</button>
+      <button class="back-btn" onclick="app.closeDetail()">‹ Back</button>
       <h1 style="font-size:17px;flex:1">${esc(item.name)}</h1>
+      ${item.imageId ? `<button class="btn-icon" style="font-size:16px" onclick="app.removeItemBg('${item.id}')">✂️</button>` : ''}
       <button class="btn-icon" style="font-size:16px" onclick="app.deleteItem('${item.id}')">🗑️</button>
     </div>
     <div class="detail-body">
@@ -1471,6 +1691,8 @@ app.generateFromTwoItems = (id1, id2) => {
   app._seedSelections = new Set([id1, id2]);
   app._outfitGuidance = '';
   outfitVibe = null;
+  outfitWeather = null;
+  outfitNoJeans = false;
   showOutfitStep2();
 };
 
@@ -1479,6 +1701,8 @@ app.saveItemName = async (id) => {
   if (!newName) return;
   const item = items.find(i => i.id === id);
   if (!item) return;
+  const oldName = item.name;
+  pushUndo({ type: 'edit-item', itemId: id, oldData: { name: oldName }, description: `Reverted name to "${oldName}"` });
   item.name = newName;
   await db.putItem(item);
   app.showItemDetail(id);
@@ -1515,10 +1739,37 @@ app.reanalyzeItem = async (id) => {
   }
 };
 
+app.removeItemBg = async (id) => {
+  const item = items.find(i => i.id === id);
+  if (!item?.imageId) return;
+  showLoading('Removing background...');
+  try {
+    const imgData = await db.loadImage(item.imageId);
+    if (!imgData) { hideLoading(); return; }
+    let blob;
+    if (typeof imgData === 'string') {
+      const resp = await fetch(imgData);
+      blob = await resp.blob();
+    } else {
+      blob = imgData;
+    }
+    const noBg = await removeBackground(blob);
+    await db.saveImage(item.imageId, noBg);
+  } catch (e) { console.warn('BG removal failed', e); }
+  hideLoading();
+  app.showItemDetail(id);
+};
+
 app.deleteItem = async (id) => {
   if (!confirm('Delete this item?')) return;
   const item = items.find(i => i.id === id);
-  if (item?.imageId) await db.deleteImage(item.imageId);
+  // Save for undo
+  let imageData = null;
+  if (item?.imageId) {
+    imageData = await db.loadImage(item.imageId);
+    await db.deleteImage(item.imageId);
+  }
+  pushUndo({ type: 'delete-item', item: { ...item }, imageData, description: `Restored "${item?.name || 'item'}"` });
   await db.deleteItem(id);
   items = items.filter(i => i.id !== id);
   closeDetail();
@@ -1539,6 +1790,60 @@ function renderPalettes() {
       <h1>Palettes</h1>
       <button class="btn-icon" onclick="app.showPaletteEditor()">+</button>
     </div>
+
+    <!-- Color Wheel & Guide -->
+    <div class="color-wheel-section">
+      <div style="font-size:17px;font-weight:700;margin-bottom:16px;text-align:center">Color Harmony Guide</div>
+      <div style="display:flex;justify-content:center;margin-bottom:20px">
+        <canvas id="color-wheel-canvas" width="220" height="220"></canvas>
+      </div>
+      <div class="harmony-cards">
+        <div class="harmony-card" style="border-left:4px solid hsl(0,70%,50%)">
+          <div class="harmony-card-dots">
+            <div style="background:hsl(0,70%,50%)"></div>
+            <div style="background:hsl(180,70%,50%)"></div>
+          </div>
+          <div class="harmony-card-text">
+            <div class="harmony-card-title">Complementary</div>
+            <div class="harmony-card-desc">Opposite on the wheel. Bold contrast, eye-catching outfits.</div>
+          </div>
+        </div>
+        <div class="harmony-card" style="border-left:4px solid hsl(210,70%,50%)">
+          <div class="harmony-card-dots">
+            <div style="background:hsl(200,70%,50%)"></div>
+            <div style="background:hsl(220,70%,50%)"></div>
+            <div style="background:hsl(240,70%,50%)"></div>
+          </div>
+          <div class="harmony-card-text">
+            <div class="harmony-card-title">Analogous</div>
+            <div class="harmony-card-desc">Neighbors on the wheel. Easy, natural, harmonious look.</div>
+          </div>
+        </div>
+        <div class="harmony-card" style="border-left:4px solid hsl(120,70%,45%)">
+          <div class="harmony-card-dots">
+            <div style="background:hsl(0,70%,50%)"></div>
+            <div style="background:hsl(120,70%,45%)"></div>
+            <div style="background:hsl(240,65%,50%)"></div>
+          </div>
+          <div class="harmony-card-text">
+            <div class="harmony-card-title">Triadic</div>
+            <div class="harmony-card-desc">Three evenly spaced. Vibrant and balanced energy.</div>
+          </div>
+        </div>
+        <div class="harmony-card" style="border-left:4px solid hsl(220,30%,40%)">
+          <div class="harmony-card-dots">
+            <div style="background:hsl(220,20%,25%)"></div>
+            <div style="background:hsl(220,20%,50%)"></div>
+            <div style="background:hsl(220,20%,75%)"></div>
+          </div>
+          <div class="harmony-card-text">
+            <div class="harmony-card-title">Monochromatic</div>
+            <div class="harmony-card-desc">One color, different shades. Elegant, sophisticated, safe.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     ${palettes.length === 0 ? `
       <div class="empty-state">
         <div class="icon">🎨</div>
@@ -1553,6 +1858,225 @@ function renderPalettes() {
       ${custom.map(p => renderPaletteItem(p)).join('')}
     `}
   `;
+
+  // Draw color wheel
+  drawColorWheel();
+}
+
+function drawColorWheel() {
+  const canvas = document.getElementById('color-wheel-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const cx = w / 2, cy = h / 2;
+  const outerR = Math.min(cx, cy) - 14;
+  const innerR = outerR * 0.6;
+
+  // Clear
+  ctx.clearRect(0, 0, w, h);
+
+  // Draw color ring
+  for (let angle = 0; angle < 360; angle++) {
+    const rad1 = (angle - 0.8) * Math.PI / 180;
+    const rad2 = (angle + 0.8) * Math.PI / 180;
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR, rad1, rad2);
+    ctx.arc(cx, cy, innerR, rad2, rad1, true);
+    ctx.closePath();
+    ctx.fillStyle = `hsl(${angle}, 80%, 55%)`;
+    ctx.fill();
+  }
+
+  // Smooth ring edges
+  ctx.beginPath();
+  ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // White center
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerR - 1, 0, Math.PI * 2);
+  ctx.fillStyle = 'white';
+  ctx.fill();
+
+  // Color labels around the outside
+  ctx.font = '600 10px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#555';
+  const labels = [
+    [0, 'Red'], [30, 'Orange'], [60, 'Yellow'], [120, 'Green'],
+    [180, 'Cyan'], [210, 'Blue'], [270, 'Purple'], [330, 'Pink']
+  ];
+  const labelR = outerR + 11;
+  for (const [deg, label] of labels) {
+    const rad = (deg - 90) * Math.PI / 180;
+    const lx = cx + Math.cos(rad) * labelR;
+    const ly = cy + Math.sin(rad) * labelR;
+    ctx.fillText(label, lx, ly);
+  }
+}
+
+function drawOutfitColorWheel(canvasId, colors) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !colors.length) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const cx = w / 2, cy = h / 2;
+  const outerR = Math.min(cx, cy) - 28;
+  const innerR = outerR * 0.6;
+  const midR = (outerR + innerR) / 2;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Draw the color ring
+  for (let angle = 0; angle < 360; angle++) {
+    const rad1 = (angle - 0.8) * Math.PI / 180;
+    const rad2 = (angle + 0.8) * Math.PI / 180;
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR, rad1, rad2);
+    ctx.arc(cx, cy, innerR, rad2, rad1, true);
+    ctx.closePath();
+    ctx.fillStyle = `hsl(${angle}, 75%, 55%)`;
+    ctx.fill();
+  }
+
+  // Smooth ring edges
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, outerR, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, innerR, 0, Math.PI * 2); ctx.stroke();
+
+  // White center
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerR - 1, 0, Math.PI * 2);
+  ctx.fillStyle = '#fafafa';
+  ctx.fill();
+
+  // Draw connection lines between colors (inside the wheel)
+  if (colors.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(72, 116, 212, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    const pts = colors.map(c => {
+      const rad = (c.hue - 90) * Math.PI / 180;
+      return { x: cx + Math.cos(rad) * midR, y: cy + Math.sin(rad) * midR };
+    });
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Fill the polygon with translucent accent
+    ctx.fillStyle = 'rgba(72, 116, 212, 0.08)';
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Draw color dots on the ring with labels
+  ctx.font = '600 10px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  colors.forEach((c, i) => {
+    const rad = (c.hue - 90) * Math.PI / 180;
+    const dotX = cx + Math.cos(rad) * midR;
+    const dotY = cy + Math.sin(rad) * midR;
+    const dotR = 10;
+
+    // Outer glow
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, dotR + 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fill();
+
+    // Color dot
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2);
+    ctx.fillStyle = `hsl(${c.hue}, ${Math.round(c.sat * 100)}%, ${Math.round(c.light * 100)}%)`;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Label outside the ring
+    const labelR = outerR + 16;
+    const lx = cx + Math.cos(rad) * labelR;
+    const ly = cy + Math.sin(rad) * labelR;
+    ctx.fillStyle = '#333';
+    ctx.fillText(c.name, lx, ly);
+  });
+
+  // Detect harmony type and show label
+  const hues = colors.map(c => c.hue);
+  const harmonyType = detectHarmony(hues);
+  const labelEl = document.getElementById('outfit-harmony-label');
+  if (labelEl) {
+    const descriptions = {
+      'Monochromatic': 'Same color family, different shades — elegant & sophisticated',
+      'Analogous': 'Neighboring colors on the wheel — harmonious & easy on the eye',
+      'Complementary': 'Opposite colors on the wheel — bold & high contrast',
+      'Split-Complementary': 'One color + two neighbors of its opposite — vibrant yet balanced',
+      'Triadic': 'Three evenly spaced colors — lively & dynamic',
+      'Neutral': 'Low-saturation tones — timeless & versatile',
+      'Mixed': 'Creative color combination',
+    };
+    labelEl.innerHTML = `<strong>${harmonyType}</strong><br><span style="font-size:11px">${descriptions[harmonyType] || ''}</span>`;
+  }
+
+  // Draw harmony label in center of wheel
+  ctx.fillStyle = '#333';
+  ctx.font = '700 12px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(harmonyType, cx, cy - 4);
+  ctx.font = '400 9px -apple-system, sans-serif';
+  ctx.fillStyle = '#888';
+  ctx.fillText('harmony', cx, cy + 10);
+}
+
+function detectHarmony(hues) {
+  if (hues.length < 2) return 'Monochromatic';
+
+  // Check if all are neutral/low-saturation (handled by caller via sat, but approximate by hue spread)
+  const sorted = [...hues].sort((a, b) => a - b);
+
+  // Hue differences between all pairs
+  const diffs = [];
+  for (let i = 0; i < hues.length; i++) {
+    for (let j = i + 1; j < hues.length; j++) {
+      const d = Math.abs(hues[i] - hues[j]);
+      diffs.push(Math.min(d, 360 - d));
+    }
+  }
+  const maxDiff = Math.max(...diffs);
+  const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+
+  if (maxDiff < 25) return 'Monochromatic';
+  if (maxDiff < 60) return 'Analogous';
+  if (hues.length === 2 && Math.abs(maxDiff - 180) < 30) return 'Complementary';
+  if (hues.length >= 3) {
+    // Check triadic (120 apart)
+    const isTriadic = diffs.every(d => Math.abs(d - 120) < 25 || Math.abs(d - 240) < 25);
+    if (isTriadic) return 'Triadic';
+
+    // Check split-complementary
+    const hasFarPair = diffs.some(d => Math.abs(d - 180) < 30);
+    const hasClosePair = diffs.some(d => d < 60);
+    if (hasFarPair && hasClosePair) return 'Split-Complementary';
+  }
+  if (Math.abs(maxDiff - 180) < 35) return 'Complementary';
+  if (maxDiff < 90) return 'Analogous';
+
+  return 'Mixed';
 }
 
 function renderPaletteItem(p) {
@@ -1575,7 +2099,7 @@ app.showPaletteDetail = (id) => {
 
   openDetail(`
     <div class="detail-header">
-      <button class="back-btn" onclick="app.closeDetail()">‹</button>
+      <button class="back-btn" onclick="app.closeDetail()">‹ Back</button>
       <h1 style="font-size:17px;flex:1">${esc(p.name)}</h1>
       ${!p.isBuiltIn ? `<button class="btn-icon" style="font-size:16px" onclick="app.showPaletteEditor('${p.id}')">✏️</button>` : ''}
     </div>
@@ -1772,6 +2296,7 @@ function renderOutfits() {
     <div class="view-header">
       <h1>Outfits</h1>
       <div style="display:flex;gap:8px">
+        <button class="btn-icon" onclick="app.showWishlist()" title="Wish List" style="font-size:16px;${wishlist.length ? 'background:var(--warning);color:white' : ''}">💝</button>
         ${saved.some(o => o.favorite) ? `<button class="btn-icon" onclick="app.toggleFavFilter()" title="Favorites" style="font-size:16px;${showFavoritesOnly ? 'background:var(--accent);color:white' : ''}">❤️</button>` : ''}
       </div>
     </div>
@@ -1783,7 +2308,7 @@ function renderOutfits() {
       </div>
     ` : `
       <div class="outfit-list" style="padding:12px 16px">
-        ${displayed.map(o => renderOutfitCard(o)).join('')}
+        ${displayed.map((o, idx) => renderOutfitCard(o, idx + 1)).join('')}
       </div>
     `}
   `;
@@ -1795,11 +2320,12 @@ app.toggleFavFilter = () => {
   renderOutfits();
 };
 
-function renderOutfitCard(outfit) {
+function renderOutfitCard(outfit, num) {
   const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
   const isFav = !!outfit.favorite;
   return `
     <div class="outfit-card-wide">
+      <div class="outfit-number">Outfit #${num || ''}</div>
       <div class="outfit-card-row" onclick="app.showOutfitDetail('${outfit.id}')">
         <div class="outfit-card-ai">
           ${outfit.aiImageId
@@ -1835,47 +2361,145 @@ app.showOutfitDetail = async (id) => {
   if (!outfit) return;
   const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
 
+  // Find outfit number (position in saved list)
+  const saved = outfits.filter(o => o.isSaved).sort((a, b) => b.dateCreated - a.dateCreated);
+  const outfitNum = saved.findIndex(o => o.id === id) + 1;
+
+  const isInWishlist = wishlist.some(w => w.outfitId === outfit.id);
+  const isFav = !!outfit.favorite;
+
+  // Score explanations
+  const colorExpl = outfit.colorScore >= 0.7 ? 'Colors work very well together and match the palette' :
+    outfit.colorScore >= 0.4 ? 'Colors are acceptable but could be more coordinated' :
+    'Colors clash or don\'t match the palette well';
+  const compExpl = outfit.completenessScore >= 0.7 ? 'Outfit has all key pieces (shirt, pants, shoes, etc.)' :
+    outfit.completenessScore >= 0.4 ? 'Missing some optional pieces like belt or jacket' :
+    'Missing essential items like pants or shirt';
+  const styleExpl = outfit.styleScore >= 0.7 ? 'All items share a consistent style direction' :
+    outfit.styleScore >= 0.4 ? 'Mix of styles — some items don\'t match the vibe' :
+    'Items have very different style tags (e.g. formal + sporty)';
+
   openDetail(`
     <div class="detail-header">
-      <button class="back-btn" onclick="app.closeDetail()">‹</button>
-      <h1 style="font-size:17px;flex:1">Outfit</h1>
+      <button class="back-btn" onclick="app.closeDetail()">‹ Back</button>
+      <h1 style="font-size:17px;flex:1">Outfit${outfitNum ? ' #' + outfitNum : ''}</h1>
       <button class="btn-icon" style="font-size:16px" onclick="app.deleteOutfit('${outfit.id}')">🗑️</button>
     </div>
     <div class="detail-body">
-      ${outfit.aiImageId ?
-        `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;border-radius:var(--radius);background:var(--bg);margin-bottom:12px">` :
-        `<div style="width:100%;aspect-ratio:4/3;background:var(--bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px;margin-bottom:12px">AI image generating...</div>`}
-
-      <div class="section-title">Items (tap to replace)</div>
-      <div style="display:flex;gap:10px;overflow-x:auto;padding:4px 0 12px;scrollbar-width:none">
-        ${oi.map((item, idx) => `
-          <div style="flex-shrink:0;text-align:center;cursor:pointer" onclick="app.showReplaceItem('${outfit.id}', ${idx})">
-            ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:100px;height:100px;border-radius:8px;object-fit:cover;display:block">` : `<div style="width:100px;height:100px;border-radius:8px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:20px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''}</div>`}
-            <div style="font-size:11px;font-weight:600;margin-top:4px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.name)}</div>
-            <div style="font-size:10px;color:var(--accent)">Replace ›</div>
+      <!-- Side-by-side: AI image left, items right -->
+      <div class="outfit-detail-split">
+        <div class="outfit-detail-left">
+          <div class="ai-image-wishlist-wrap" onclick="app.showImageWishPicker('${outfit.id}')">
+            ${outfit.aiImageId ?
+              `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;border-radius:var(--radius);background:var(--bg);display:block">` :
+              `<div style="width:100%;aspect-ratio:3/4;background:var(--bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px">AI image generating...</div>`}
+            <div class="ai-image-hint">Tap image to add items to Wish List</div>
           </div>
-        `).join('')}
+          <div style="display:flex;gap:8px;margin-top:12px">
+            ${isInWishlist ? `<button class="btn btn-sm btn-secondary" style="flex:1" onclick="app.toggleWishlist('${outfit.id}')">✓ In Wish List</button>` :
+              `<button class="btn btn-sm btn-outline" style="flex:1" onclick="app.showImageWishPicker('${outfit.id}')">🛒 Wish List</button>`}
+            <button class="btn btn-sm btn-outline" style="flex:1" onclick="app.toggleFavoriteDetail('${outfit.id}')">
+              ${isFav ? '❤️ Favorited' : '🤍 Favorite'}
+            </button>
+          </div>
+        </div>
+        <div class="outfit-detail-right">
+          ${oi.map((item, idx) => {
+            const cat = CATEGORIES.find(c => c.id === item.category);
+            const isBuyChecked = (outfit.buyItems || []).includes(item.id);
+            return `
+              <div class="item-row" style="position:relative">
+                <div class="wishlist-check ${isBuyChecked ? 'checked' : ''}" onclick="event.stopPropagation(); app.toggleOutfitBuyItem('${outfit.id}', '${item.id}')" style="cursor:pointer;flex-shrink:0" title="Mark to buy">
+                  ${isBuyChecked ? '☑' : '☐'}
+                </div>
+                <div style="cursor:pointer;display:flex;align-items:center;gap:12px;flex:1;min-width:0" onclick="app.showItemDetail('${item.id}')">
+                  ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:60px;height:60px;border-radius:8px;object-fit:cover;flex-shrink:0">` :
+                    `<div style="width:60px;height:60px;border-radius:8px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${cat?.icon || ''}</div>`}
+                  <div class="item-info" style="min-width:0">
+                    <div class="name">${esc(item.name)}</div>
+                    <div class="cat">${cat?.name || ''}</div>
+                  </div>
+                </div>
+                <div style="font-size:11px;color:var(--accent);flex-shrink:0;cursor:pointer" onclick="app.showReplaceItem('${outfit.id}', ${idx})">Replace ›</div>
+              </div>
+            `;
+          }).join('')}
+          ${(() => {
+            const presentCats = new Set(oi.map(i => i.category));
+            const missing = CATEGORIES.filter(c => !presentCats.has(c.id));
+            if (!missing.length) return '';
+            return '<div style="margin-top:8px;padding:8px 10px;background:var(--accent-light);border-radius:8px;font-size:12px;color:var(--accent)">Missing: ' + missing.map(c => c.icon + ' ' + c.name).join(', ') + ' — regenerate to include them</div>';
+          })()}
+        </div>
       </div>
 
       <div class="divider"></div>
 
+      <!-- Refine -->
       <div class="section-title">Refine with Text</div>
       <div style="display:flex;gap:8px;margin-bottom:16px">
         <input id="outfit-feedback-text" type="text" placeholder="e.g. make it more casual, swap belt..." style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px">
         <button class="btn btn-primary btn-sm" onclick="app.applyOutfitFeedback('${outfit.id}')">Apply</button>
       </div>
 
-      <div class="section-title">Score</div>
-      <div class="score-row"><span class="label">Color Match</span><span class="value ${scoreColor(outfit.colorScore)}">${Math.round(outfit.colorScore * 100)}%</span></div>
-      <div class="score-row"><span class="label">Completeness</span><span class="value ${scoreColor(outfit.completenessScore)}">${Math.round(outfit.completenessScore * 100)}%</span></div>
-      <div class="score-row"><span class="label">Style Harmony</span><span class="value ${scoreColor(outfit.styleScore)}">${Math.round(outfit.styleScore * 100)}%</span></div>
       <div class="divider"></div>
-      <div class="score-row"><span class="label" style="font-weight:700">Overall</span><span class="value ${scoreColor(outfit.overallScore)}" style="font-weight:700">${Math.round(outfit.overallScore * 100)}%</span></div>
 
-      <div style="font-size:12px;color:var(--text-secondary);margin-top:12px">${new Date(outfit.dateCreated).toLocaleDateString()}</div>
+      <!-- Scores -->
+      <div class="section-title">Score</div>
+      <div class="score-row">
+        <span class="label">Color Match</span>
+        <span class="value ${scoreColor(outfit.colorScore)}">${Math.round(outfit.colorScore * 100)}%</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;padding-left:2px">${colorExpl}</div>
+
+      <div class="score-row">
+        <span class="label">Completeness</span>
+        <span class="value ${scoreColor(outfit.completenessScore)}">${Math.round(outfit.completenessScore * 100)}%</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;padding-left:2px">${compExpl}</div>
+
+      <div class="score-row">
+        <span class="label">Style Harmony</span>
+        <span class="value ${scoreColor(outfit.styleScore)}">${Math.round(outfit.styleScore * 100)}%</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;padding-left:2px">${styleExpl}</div>
+
+      <div class="divider"></div>
+      <div class="score-row"><span class="label" style="font-weight:700">Overall</span><span class="value ${scoreColor(outfit.overallScore)}" style="font-weight:700;font-size:18px">${Math.round(outfit.overallScore * 100)}%</span></div>
+
+      <div class="divider"></div>
+
+      <!-- Color Harmony Wheel -->
+      <div class="section-title">Color Harmony</div>
+      <div style="display:flex;justify-content:center;margin-bottom:8px">
+        <canvas id="outfit-color-wheel" width="260" height="260"></canvas>
+      </div>
+      <div id="outfit-harmony-label" style="text-align:center;font-size:13px;color:var(--text-secondary);margin-bottom:8px"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:12px">
+        ${oi.filter(i => i.colorProfile).map(item => {
+          const cat = CATEGORIES.find(c => c.id === item.category);
+          return `<div style="display:flex;align-items:center;gap:4px;padding:3px 10px;background:var(--bg);border-radius:12px;font-size:11px">
+            <div style="width:12px;height:12px;border-radius:50%;background:${hslToCss(item.colorProfile.dominantColor)};border:1px solid rgba(0,0,0,0.15)"></div>
+            ${cat?.name || ''}
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div style="font-size:12px;color:var(--text-secondary);margin-top:16px;text-align:center">${new Date(outfit.dateCreated).toLocaleDateString()}</div>
     </div>
   `);
   lazyLoadImages();
+
+  // Draw outfit color wheel
+  setTimeout(() => {
+    const colors = oi.filter(i => i.colorProfile).map(i => ({
+      hue: i.colorProfile.dominantColor.hue,
+      sat: i.colorProfile.dominantColor.saturation,
+      light: i.colorProfile.dominantColor.lightness,
+      name: CATEGORIES.find(c => c.id === i.category)?.name || '',
+    }));
+    drawOutfitColorWheel('outfit-color-wheel', colors);
+  }, 50);
 };
 
 app.applyOutfitFeedback = async (outfitId) => {
@@ -2027,8 +2651,24 @@ app.applyOutfitFeedback = async (outfitId) => {
   })));
 };
 
+app.toggleOutfitBuyItem = async (outfitId, itemId) => {
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+  if (!outfit.buyItems) outfit.buyItems = [];
+  const idx = outfit.buyItems.indexOf(itemId);
+  if (idx >= 0) {
+    outfit.buyItems.splice(idx, 1);
+  } else {
+    outfit.buyItems.push(itemId);
+  }
+  await db.putOutfit(outfit);
+  app.showOutfitDetail(outfitId);
+};
+
 app.deleteOutfit = async (id) => {
   if (!confirm('Delete this outfit?')) return;
+  const outfit = outfits.find(o => o.id === id);
+  if (outfit) pushUndo({ type: 'delete-outfit', outfit: { ...outfit }, description: 'Restored deleted outfit' });
   await db.deleteOutfit(id);
   outfits = outfits.filter(o => o.id !== id);
   closeDetail();
@@ -2037,6 +2677,8 @@ app.deleteOutfit = async (id) => {
 
 app.quickDeleteOutfit = async (id) => {
   if (!confirm('Delete this outfit?')) return;
+  const outfit = outfits.find(o => o.id === id);
+  if (outfit) pushUndo({ type: 'delete-outfit', outfit: { ...outfit }, description: 'Restored deleted outfit' });
   await db.deleteOutfit(id);
   outfits = outfits.filter(o => o.id !== id);
   renderOutfits();
@@ -2048,6 +2690,268 @@ app.toggleFavorite = async (id) => {
   outfit.favorite = !outfit.favorite;
   await db.putOutfit(outfit);
   renderOutfits();
+};
+
+app.toggleFavoriteDetail = async (id) => {
+  const outfit = outfits.find(o => o.id === id);
+  if (!outfit) return;
+  outfit.favorite = !outfit.favorite;
+  await db.putOutfit(outfit);
+  app.showOutfitDetail(id);
+};
+
+// ══════════════════════════════════════
+// ── NEED TO BUY (WISHLIST) ──
+// ══════════════════════════════════════
+
+app.toggleWishlist = async (outfitId) => {
+  // If already in wishlist, remove it
+  const existIdx = wishlist.findIndex(w => w.outfitId === outfitId);
+  if (existIdx >= 0) {
+    wishlist.splice(existIdx, 1);
+    await saveWishlist();
+    app.showOutfitDetail(outfitId);
+    return;
+  }
+
+  // Show item picker — let user choose which items to add
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+  const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
+
+  // Default: all items selected
+  app._wishPickSelections = new Set(oi.map(i => i.id));
+  app._wishPickOutfitId = outfitId;
+
+  openSheet(`
+    <h2>Add to Wish List</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Pick the items you want to buy:</p>
+
+    ${outfit.aiImageId ? `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--radius);background:var(--bg);margin-bottom:12px">` : ''}
+
+    <div id="wish-pick-items">
+      ${oi.map(item => {
+        const cat = CATEGORIES.find(c => c.id === item.category);
+        return `
+          <div class="item-row" style="cursor:pointer" onclick="app.toggleWishPickItem('${item.id}')">
+            <div class="wishlist-check checked" id="wish-pick-${item.id}" style="flex-shrink:0">☑</div>
+            ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:50px;height:50px;border-radius:8px;object-fit:cover;flex-shrink:0">` :
+              `<div style="width:50px;height:50px;border-radius:8px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${cat?.icon || ''}</div>`}
+            <div class="item-info" style="min-width:0">
+              <div class="name">${esc(item.name)}</div>
+              <div class="cat">${cat?.name || ''}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <button class="btn btn-primary" style="margin-top:16px" onclick="app.confirmWishPick()">Add Selected to Wish List</button>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Cancel</button>
+  `);
+  lazyLoadImages();
+};
+
+app.showImageWishPicker = (outfitId) => {
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+  const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
+
+  // Approximate vertical positions for each category on a full-body AI image
+  const catPositions = { shirt: 25, jacket: 30, pants: 55, belt: 45, shoes: 85 };
+
+  openSheet(`
+    <h2>Tap an item to add to Wish List</h2>
+    <div class="ai-wish-picker" style="position:relative;margin-bottom:16px">
+      ${outfit.aiImageId ? `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;border-radius:var(--radius);display:block">` : ''}
+      <div class="ai-wish-labels">
+        ${oi.map(item => {
+          const cat = CATEGORIES.find(c => c.id === item.category);
+          const topPct = catPositions[item.category] || 50;
+          return `
+            <button class="ai-wish-label" style="top:${topPct}%" onclick="event.stopPropagation(); app.quickAddToWishlist('${outfitId}', '${item.id}')">
+              ${cat?.icon || ''} ${cat?.name || ''}
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--text-secondary);text-align:center;margin-bottom:12px">Or add all items:</p>
+    <button class="btn btn-outline" onclick="app.toggleWishlist('${outfitId}')">🛒 Add Entire Outfit</button>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Cancel</button>
+  `);
+  lazyLoadImages();
+};
+
+app.quickAddToWishlist = async (outfitId, itemId) => {
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+  const item = items.find(i => i.id === itemId);
+  if (!item) return;
+
+  // Check if outfit already in wishlist
+  let entry = wishlist.find(w => w.outfitId === outfitId);
+  if (entry) {
+    // Add item if not already there
+    if (!entry.items.some(i => i.id === itemId)) {
+      entry.items.push({ name: item.name, category: item.category, id: item.id });
+    }
+  } else {
+    // Create new wishlist entry with just this item
+    entry = {
+      outfitId,
+      aiImageId: outfit.aiImageId || null,
+      items: [{ name: item.name, category: item.category, id: item.id }],
+      checkedItems: [],
+      notes: '',
+      dateAdded: Date.now(),
+    };
+    wishlist.push(entry);
+  }
+
+  await saveWishlist();
+  closeSheet();
+
+  // Show confirmation
+  const cat = CATEGORIES.find(c => c.id === item.category);
+  openSheet(`
+    <div style="text-align:center;padding:24px">
+      <div style="font-size:48px;margin-bottom:12px">${cat?.icon || '👔'}</div>
+      <h2>Added to Wish List</h2>
+      <p style="color:var(--text-secondary);margin-bottom:4px;font-size:14px">${esc(item.name)}</p>
+      <p style="color:var(--text-secondary);margin-bottom:16px;font-size:12px">You can find it in the Wish List tab</p>
+      <button class="btn btn-outline" style="margin-bottom:8px" onclick="closeSheet(); app.showImageWishPicker('${outfitId}')">Add Another Item</button>
+      <button class="btn btn-secondary" onclick="closeSheet(); app.showOutfitDetail('${outfitId}')">Done</button>
+    </div>
+  `);
+};
+
+app.toggleWishPickItem = (itemId) => {
+  if (app._wishPickSelections.has(itemId)) {
+    app._wishPickSelections.delete(itemId);
+  } else {
+    app._wishPickSelections.add(itemId);
+  }
+  const el = document.getElementById(`wish-pick-${itemId}`);
+  if (el) {
+    const isOn = app._wishPickSelections.has(itemId);
+    el.className = `wishlist-check ${isOn ? 'checked' : ''}`;
+    el.textContent = isOn ? '☑' : '☐';
+  }
+};
+
+app.confirmWishPick = async () => {
+  const outfitId = app._wishPickOutfitId;
+  const selectedIds = app._wishPickSelections;
+  if (!selectedIds.size) { alert('Pick at least one item.'); return; }
+
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+  const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
+  const selectedItems = oi.filter(i => selectedIds.has(i.id));
+
+  wishlist.push({
+    outfitId,
+    aiImageId: outfit.aiImageId || null,
+    items: selectedItems.map(i => ({ name: i.name, category: i.category, id: i.id })),
+    checkedItems: [],
+    notes: '',
+    dateAdded: Date.now(),
+  });
+  await saveWishlist();
+  closeSheet();
+  app.showOutfitDetail(outfitId);
+};
+
+app.showWishlist = () => {
+  if (!wishlist.length) {
+    openSheet(`
+      <h2>Wish List</h2>
+      <div class="empty-state" style="padding:32px">
+        <div class="icon">🛒</div>
+        <h3>Nothing Yet</h3>
+        <p>Tap "Wish List" on any outfit to save it here with shopping links.</p>
+      </div>
+      <button class="btn btn-secondary" onclick="closeSheet()">Close</button>
+    `);
+    return;
+  }
+
+  openSheet(`
+    <h2>Wish List</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">${wishlist.length} outfit${wishlist.length !== 1 ? 's' : ''} saved for shopping</p>
+    <div class="outfit-list">
+      ${wishlist.map((w, wi) => {
+        const checkedItems = w.checkedItems || [];
+        return `
+          <div class="outfit-card-wide" style="margin-bottom:20px">
+            <div style="padding:10px 12px;font-weight:700;font-size:14px;border-bottom:1px solid var(--border)">Outfit ${wi + 1}</div>
+            ${w.aiImageId ? `<img data-ai-image-id="${w.aiImageId}" class="lazy-ai-img" style="width:100%;max-height:250px;object-fit:contain;background:var(--bg)">` : ''}
+            <div style="padding:10px 12px">
+              ${w.items.map((item, ii) => {
+                const cat = CATEGORIES.find(c => c.id === item.category);
+                const searchQuery = encodeURIComponent(item.name);
+                const isChecked = checkedItems.includes(ii);
+                return `
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                    <div class="wishlist-check ${isChecked ? 'checked' : ''}" onclick="app.toggleWishlistItem(${wi}, ${ii})" style="cursor:pointer;flex-shrink:0">
+                      ${isChecked ? '☑' : '☐'}
+                    </div>
+                    <span style="font-size:16px;flex-shrink:0">${cat?.icon || '👔'}</span>
+                    <span style="flex:1;font-size:13px;${isChecked ? 'font-weight:600' : ''}">${esc(item.name)}</span>
+                    <a href="https://www.asos.com/search/?q=${searchQuery}" target="_blank" rel="noopener"
+                       style="font-size:12px;color:var(--accent);text-decoration:none;padding:4px 10px;border:1px solid var(--accent);border-radius:14px;white-space:nowrap;flex-shrink:0"
+                       onclick="event.stopPropagation()">
+                      ASOS ›
+                    </a>
+                  </div>
+                `;
+              }).join('')}
+
+              <div style="margin-top:12px">
+                <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">My notes & links</label>
+                <textarea id="wishlist-notes-${wi}" rows="3"
+                  style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;resize:vertical"
+                  placeholder="Paste links you found, add notes..."
+                  onblur="app.saveWishlistNotes(${wi}, this.value)">${esc(w.notes || '')}</textarea>
+              </div>
+
+              <button class="btn btn-sm btn-danger" style="margin-top:10px" onclick="app.removeFromWishlist(${wi})">Remove</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Close</button>
+  `);
+  lazyLoadImages();
+};
+
+app.toggleWishlistItem = async (outfitIdx, itemIdx) => {
+  const w = wishlist[outfitIdx];
+  if (!w) return;
+  if (!w.checkedItems) w.checkedItems = [];
+  const pos = w.checkedItems.indexOf(itemIdx);
+  if (pos >= 0) {
+    w.checkedItems.splice(pos, 1);
+  } else {
+    w.checkedItems.push(itemIdx);
+  }
+  await saveWishlist();
+  app.showWishlist();
+};
+
+app.saveWishlistNotes = async (outfitIdx, text) => {
+  const w = wishlist[outfitIdx];
+  if (!w) return;
+  w.notes = text;
+  await saveWishlist();
+};
+
+app.removeFromWishlist = async (index) => {
+  wishlist.splice(index, 1);
+  await saveWishlist();
+  app.showWishlist();
 };
 
 // ══════════════════════════════════════
@@ -2062,6 +2966,8 @@ app.generateFromItem = (itemId) => {
   closeDetail();
   outfitSeedItem = items.find(i => i.id === itemId) || null;
   outfitVibe = null;
+  outfitWeather = null;
+  outfitNoJeans = false;
   showOutfitStep2();
 };
 
@@ -2078,7 +2984,7 @@ function showGeneratorView() {
 
   openDetail(`
     <div class="detail-header">
-      <button class="back-btn" onclick="app.closeDetail()">‹</button>
+      <button class="back-btn" onclick="app.closeDetail()">‹ Back</button>
       <h1 style="font-size:17px;flex:1">Generate Outfits</h1>
     </div>
     <div class="detail-body">
@@ -2196,29 +3102,42 @@ app.showGeneratedDetail = (idx) => {
   if (!r) return;
 
   const cacheKey2 = outfitImageCacheKey(r.items.map(i => i.id));
+  const savedOutfit = outfits.find(o => outfitImageCacheKey(o.itemIds) === cacheKey2);
+  const isInWishlist = savedOutfit && wishlist.some(w => w.outfitId === savedOutfit.id);
+
+  const colorExpl = r.colorScore >= 0.7 ? 'Colors work very well together' : r.colorScore >= 0.4 ? 'Colors are acceptable but could improve' : 'Colors don\'t match well';
+  const compExpl = r.completenessScore >= 0.7 ? 'Has all key pieces' : r.completenessScore >= 0.4 ? 'Missing some optional pieces' : 'Missing essential items';
+  const styleExpl = r.styleScore >= 0.7 ? 'Consistent style direction' : r.styleScore >= 0.4 ? 'Mixed styles' : 'Conflicting styles';
+
   openSheet(`
-    <h2>Outfit Detail</h2>
-    <div class="outfit-side-by-side">
-      <div class="outfit-side-ai">
-        <img data-ai-cache-key="${cacheKey2}" class="lazy-ai-cache" style="width:100%;border-radius:var(--radius);background:var(--bg)">
-      </div>
-      <div class="outfit-side-items">
-        ${r.items.map(item => `
-          <div class="item-row" style="padding:6px 8px;margin-bottom:4px">
-            ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:40px;height:40px;border-radius:6px">` : `<div style="width:40px;height:40px;border-radius:6px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:14px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''}</div>`}
-            <div class="item-info" style="min-width:0">
-              <div class="name" style="font-size:12px">${esc(item.name)}</div>
-              <div class="cat" style="font-size:10px">${CATEGORIES.find(c => c.id === item.category)?.name || ''}</div>
-            </div>
+    <h2>Outfit #${idx + 1}</h2>
+    <img data-ai-cache-key="${cacheKey2}" class="lazy-ai-cache" style="width:100%;max-height:350px;object-fit:contain;border-radius:var(--radius);background:var(--bg);margin-bottom:12px">
+
+    <div class="section-title">Items</div>
+    ${r.items.map(item => {
+      const cat = CATEGORIES.find(c => c.id === item.category);
+      return `
+        <div class="item-row" style="padding:6px 8px;margin-bottom:4px;cursor:pointer" onclick="closeSheet(); app.showItemDetail('${item.id}')">
+          ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:50px;height:50px;border-radius:6px">` : `<div style="width:50px;height:50px;border-radius:6px;background:${item.colorProfile ? hslToCss(item.colorProfile.dominantColor) : 'var(--bg)'};display:flex;align-items:center;justify-content:center;font-size:14px">${cat?.icon || ''}</div>`}
+          <div class="item-info" style="min-width:0">
+            <div class="name" style="font-size:13px">${esc(item.name)}</div>
+            <div class="cat" style="font-size:11px">${cat?.name || ''}</div>
           </div>
-        `).join('')}
-      </div>
-    </div>
+        </div>
+      `;
+    }).join('')}
+
+    ${savedOutfit ? `<button class="btn ${isInWishlist ? 'btn-secondary' : 'btn-outline'}" style="margin-top:10px" onclick="app.toggleWishlist('${savedOutfit.id}'); app.showGeneratedDetail(${idx})">
+      ${isInWishlist ? '✓ In Wish List' : '🛒 Wish List'}
+    </button>` : ''}
 
     <div class="divider"></div>
     <div class="score-row"><span class="label">Color Match</span><span class="value ${scoreColor(r.colorScore)}">${Math.round(r.colorScore * 100)}%</span></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${colorExpl}</div>
     <div class="score-row"><span class="label">Completeness</span><span class="value ${scoreColor(r.completenessScore)}">${Math.round(r.completenessScore * 100)}%</span></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${compExpl}</div>
     <div class="score-row"><span class="label">Style Harmony</span><span class="value ${scoreColor(r.styleScore)}">${Math.round(r.styleScore * 100)}%</span></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${styleExpl}</div>
     <div class="divider"></div>
     <div class="score-row"><span class="label" style="font-weight:700">Overall</span><span class="value ${scoreColor(r.overallScore)}" style="font-weight:700">${Math.round(r.overallScore * 100)}%</span></div>
 
@@ -2227,7 +3146,7 @@ app.showGeneratedDetail = (idx) => {
     </div>
 
     <div style="text-align:center;font-size:13px;color:var(--success);margin-bottom:8px">Auto-saved to Outfits</div>
-    <button class="btn btn-secondary" onclick="closeSheet()">Close</button>
+    <button class="btn btn-secondary" onclick="closeSheet()">‹ Back</button>
   `);
   lazyLoadImages();
 };
@@ -2479,10 +3398,63 @@ function plural(name) {
   return name + 's';
 }
 
+// ── Background Removal (flood-fill from corners) ──
+
+async function removeBackground(blob) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const w = img.width, h = img.height;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const data = imageData.data;
+      const tolerance = 45;
+      const visited = new Uint8Array(w * h);
+
+      function colorDist(i, r, g, b) {
+        return Math.abs(data[i] - r) + Math.abs(data[i+1] - g) + Math.abs(data[i+2] - b);
+      }
+
+      function floodFill(sx, sy) {
+        const refIdx = (sy * w + sx) * 4;
+        const rr = data[refIdx], rg = data[refIdx+1], rb = data[refIdx+2];
+        const stack = [[sx, sy]];
+        while (stack.length) {
+          const [x, y] = stack.pop();
+          if (x < 0 || x >= w || y < 0 || y >= h) continue;
+          const pos = y * w + x;
+          if (visited[pos]) continue;
+          const idx = pos * 4;
+          if (colorDist(idx, rr, rg, rb) > tolerance) continue;
+          visited[pos] = 1;
+          data[idx + 3] = 0; // make transparent
+          stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+        }
+      }
+
+      // Flood fill from corners and edge midpoints
+      const seeds = [[0,0],[w-1,0],[0,h-1],[w-1,h-1],[Math.floor(w/2),0],[Math.floor(w/2),h-1],[0,Math.floor(h/2)],[w-1,Math.floor(h/2)]];
+      for (const [sx, sy] of seeds) floodFill(sx, sy);
+
+      ctx.putImageData(imageData, 0, 0);
+      canvas.toBlob((b) => resolve(b || blob), 'image/png');
+    };
+    img.onerror = () => resolve(blob);
+    img.src = URL.createObjectURL(blob);
+  });
+}
+
 // Sheet (bottom modal)
 function openSheet(html) {
   const overlay = document.getElementById('sheet-overlay');
-  overlay.querySelector('.modal-sheet').innerHTML = `<div class="sheet-handle"></div>${html}`;
+  overlay.querySelector('.modal-sheet').innerHTML = `
+    <div class="sheet-handle"></div>
+    <button class="sheet-close-btn" onclick="closeSheet()" aria-label="Close">✕</button>
+    ${html}`;
   overlay.classList.add('open');
   overlay.onclick = (e) => { if (e.target === overlay) closeSheet(); };
   lazyLoadImages();
@@ -2491,11 +3463,28 @@ function openSheet(html) {
 function closeSheet() {
   document.getElementById('sheet-overlay').classList.remove('open');
 }
+// Expose closeSheet globally so inline onclick handlers work
+window.closeSheet = closeSheet;
+app.closeSheet = closeSheet;
 
 // Detail view (full screen overlay)
 function openDetail(html) {
   const d = document.getElementById('detail-overlay');
-  d.innerHTML = html;
+  // Parse HTML to separate the header from the body
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const header = tmp.querySelector('.detail-header');
+  const body = tmp.querySelector('.detail-body');
+  if (header && body) {
+    d.innerHTML = '';
+    d.appendChild(header);
+    const scroll = document.createElement('div');
+    scroll.className = 'detail-scroll';
+    scroll.appendChild(body);
+    d.appendChild(scroll);
+  } else {
+    d.innerHTML = `<div class="detail-scroll">${html}</div>`;
+  }
   d.classList.add('open');
   lazyLoadImages();
 }

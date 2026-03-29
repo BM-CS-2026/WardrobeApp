@@ -6,10 +6,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#4874d4">
-  <title>Wardrobe v24</title>
+  <title>My Style</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/styles.css?v=25">
+  <link rel="stylesheet" href="css/styles.css?v=34">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -23,12 +23,9 @@
       alert('JS Error: ' + e.reason);
     });
 
-    // Force unregister all service workers and clear all caches
+    // Register service worker for offline support
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => r.unregister());
-      });
-      caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
   </script>
 </head>
@@ -36,11 +33,14 @@
   <!-- Global top bar — always visible -->
   <div class="global-top-bar">
     <button id="home-btn" onclick="window.app && app.goHome()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-        <polyline points="9 22 9 12 15 12 15 22"/>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M12 2C9.8 2 8 3.8 8 6h8c0-2.2-1.8-4-4-4z"/>
+        <path d="M4 6l-1 14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2L20 6H4z"/>
+        <path d="M8 6v2a4 4 0 0 0 8 0V6"/>
+        <circle cx="12" cy="15" r="2" fill="currentColor" stroke="none"/>
+        <path d="M12 13v-2"/>
       </svg>
-      <span>Home</span>
+      <span style="font-size:15px;letter-spacing:0.5px">My Style</span>
     </button>
     <span id="sync-dot" title="Sync status" onclick="window.app && app.showSyncSettings()" style="width:10px;height:10px;border-radius:50%;background:#999;display:inline-block;cursor:pointer;margin-left:auto;margin-right:12px"></span>
   </div>
@@ -81,6 +81,12 @@
         <path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/>
       </svg>
       <span>Outfits</span>
+    </button>
+    <button onclick="window.app && app.showWishlist()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+      </svg>
+      <span>Wish List</span>
     </button>
   </nav>
 

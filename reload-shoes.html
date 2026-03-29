@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reload Items</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 24px; max-width: 600px; margin: 0 auto; background: #f5f5f7; }
+    h1 { font-size: 22px; margin-bottom: 8px; }
+    .card { padding: 14px; background: white; border-radius: 10px; margin: 12px 0; font-size: 14px; }
+    .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; margin: 8px 0; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-primary { background: #4874d4; color: white; }
+    .btn-warning { background: #f59e0b; color: white; }
+    .btn:disabled { opacity: 0.5; }
+    select { width: 100%; padding: 10px; border-radius: 8px; border: 1.5px solid #e5e7eb; font-size: 15px; margin: 8px 0; }
+    #log { background: white; border-radius: 10px; padding: 12px; font-size: 12px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h1>Reload Shoes & Belts</h1>
+  <p style="color:#6b7280;font-size:14px">Delete existing items and re-import from photos with AI descriptions.</p>
+
+  <div class="card">
+    <strong>Category to reload:</strong>
+    <select id="category-select">
+      <option value="shoes">Shoes</option>
+      <option value="belt">Belts</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <strong>Step 1:</strong> Delete existing items of selected category<br>
+    <button class="btn btn-danger" id="btn-delete" onclick="deleteCategory()">Delete All Items</button>
+  </div>
+
+  <div class="card">
+    <strong>Step 2:</strong> Select photos to import<br>
+    <input type="file" id="file-input" accept="image/*" multiple style="margin:8px 0;font-size:14px"><br>
+    <small style="color:#6b7280">For shoes: Downloads/untitled folder 3/resized_shoes/<br>
+    For belts: select your belt photos</small><br>
+    <button class="btn btn-primary" id="btn-import" onclick="importItems()" disabled>Import Items</button>
+  </div>
+
+  <div class="card">
+    <strong>Quick Fix:</strong> Fix broken images (re-link existing items)<br>
+    <button class="btn btn-warning" id="btn-fix" onclick="fixBrokenImages()">Fix Broken Images</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+  <script>
+    const db = new PouchDB('wardrobe_sync');
+    function makeId(store, key) { return `${store}:${key}`; }
+
+    function log(msg) {
+      const el = document.getElementById('log');
+      el.textContent += msg + '\n';
+      el.scrollTop = el.scrollHeight;
+    }
+
+    document.getElementById('file-input').addEventListener('change', function() {
+      document.getElementById('btn-import').disabled = !this.files.length;
+      log(`Selected ${this.files.length} files`);
+    });
+
+    function getCategory() {
+      return document.getElementById('category-select').value;
+    }
+
+    // ── Step 1: Delete ──
+    async function deleteCategory() {
+      const cat = getCategory();
+      document.getElementById('btn-delete').disabled = true;
+      log(`\nFinding ${cat} items...`);
+
+      try {
+        const result = await db.allDocs({ include_docs: true, startkey: 'items:', endkey: 'items:\ufff0' });
+        const matched = result.rows.filter(r => r.doc.category === cat);
+        log(`Found ${matched.length} ${cat} items to delete`);
+
+        for (const row of matched) {
+          const imageId = row.doc.imageId;
+          if (imageId) {
+            try {
+              const imgDoc = await db.get(makeId('images', imageId));
+              await db.remove(imgDoc);
+            } catch (e) {}
+          }
+          await db.remove(row.doc);
+          log(`  Deleted: ${row.doc.name || row.doc._id}`);
+        }
+        log(`\n✅ Deleted ${matched.length} ${cat} items. Now select photos for Step 2.`);
+      } catch (e) {
+        log(`❌ Error: ${e.message}`);
+      }
+      document.getElementById('btn-delete').disabled = false;
+    }
+
+    // ── Step 2: Import ──
+    async function importItems() {
+      const cat = getCategory();
+      const files = document.getElementById('file-input').files;
+      if (!files.length) return;
+      document.getElementById('btn-import').disabled = true;
+
+      log(`\nImporting ${files.length} ${cat} photos...`);
+
+      let apiKey = null;
+      try {
+        const keyDoc = await db.get('settings:openai_key');
+        apiKey = keyDoc.value;
+      } catch (e) {
+        apiKey = localStorage.getItem('openai_key');
+      }
+
+      const aiPrompt = cat === 'shoes'
+        ? 'Describe this pair of shoes in one sentence. Include: color, material, style (sneakers, dress shoes, boots, loafers, etc.), and notable features. Be concise.'
+        : 'Describe this belt in one sentence. Include: color, material (leather, fabric, etc.), buckle type, and any notable features. Be concise.';
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        log(`\n[${i + 1}/${files.length}] ${file.name} (${(file.size / 1024).toFixed(0)}KB)...`);
+
+        try {
+          const id = crypto.randomUUID();
+          const imageId = crypto.randomUUID();
+
+          // Load and resize image
+          const img = await loadImage(file);
+          const canvas = document.createElement('canvas');
+          const maxDim = 800;
+          const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          // Compress to JPEG
+          const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.75));
+          log(`  ${canvas.width}x${canvas.height}, ${(blob.size / 1024).toFixed(0)}KB`);
+
+          // Color extraction from center region
+          const cx = Math.round(canvas.width / 2);
+          const cy = Math.round(canvas.height / 2);
+          const sz = Math.round(Math.min(canvas.width, canvas.height) * 0.4);
+          const imgData = ctx.getImageData(cx - sz/2, cy - sz/2, sz, sz);
+          let rS = 0, gS = 0, bS = 0, cnt = 0;
+          for (let p = 0; p < imgData.data.length; p += 4) {
+            rS += imgData.data[p]; gS += imgData.data[p+1]; bS += imgData.data[p+2]; cnt++;
+          }
+          const dominant = rgbToHsl(rS/cnt, gS/cnt, bS/cnt);
+
+          // AI description
+          let name = `${cat} (${file.name})`;
+          if (apiKey) {
+            try {
+              const b64 = await blobToBase64(blob);
+              const aiResult = await analyzeWithAI(b64, apiKey, aiPrompt);
+              if (aiResult) name = aiResult;
+              log(`  AI: ${name.substring(0, 80)}...`);
+            } catch (e) {
+              log(`  AI failed: ${e.message}`);
+            }
+          }
+
+          // Convert blob to dataUrl for PouchDB storage
+          const dataUrl = await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+
+          // Save image — MUST use "dataUrl" field (not "data")
+          await db.put({
+            _id: makeId('images', imageId),
+            type: 'images',
+            dataUrl: dataUrl
+          });
+
+          // Save item
+          await db.put({
+            _id: makeId('items', id),
+            type: 'items',
+            name: name,
+            category: cat,
+            colorProfile: { dominantColor: dominant, secondaryColors: [], averageColor: dominant },
+            imageId: imageId,
+            dateAdded: Date.now(),
+            styleTags: [],
+          });
+
+          log(`  ✅ Saved`);
+        } catch (e) {
+          log(`  ❌ ${e.message}`);
+        }
+      }
+
+      log(`\n🎉 Done! Refresh the main app to see the new ${cat} items.`);
+      document.getElementById('btn-import').disabled = false;
+    }
+
+    // ── Fix broken images: find items with imageId but no working image doc ──
+    async function fixBrokenImages() {
+      document.getElementById('btn-fix').disabled = true;
+      log('\nScanning for broken images...');
+
+      const result = await db.allDocs({ include_docs: true, startkey: 'items:', endkey: 'items:\ufff0' });
+      let broken = 0, fixed = 0;
+
+      for (const row of result.rows) {
+        const imageId = row.doc.imageId;
+        if (!imageId) continue;
+        try {
+          const imgDoc = await db.get(makeId('images', imageId));
+          // Check if it uses wrong field name
+          if (imgDoc.data && !imgDoc.dataUrl) {
+            imgDoc.dataUrl = imgDoc.data;
+            delete imgDoc.data;
+            await db.put(imgDoc);
+            fixed++;
+            log(`  Fixed field name: ${row.doc.name || imageId}`);
+          } else if (!imgDoc.dataUrl && !imgDoc.data) {
+            broken++;
+            log(`  No image data: ${row.doc.name || imageId}`);
+          }
+        } catch (e) {
+          if (e.status === 404) {
+            broken++;
+            log(`  Missing image doc: ${row.doc.name || imageId}`);
+          }
+        }
+      }
+
+      log(`\n${fixed} fixed, ${broken} still broken (need re-import)`);
+      document.getElementById('btn-fix').disabled = false;
+    }
+
+    // ── Helpers ──
+    function loadImage(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    function rgbToHsl(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h, s, l = (max + min) / 2;
+      if (max === min) { h = s = 0; }
+      else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+          case g: h = ((b - r) / d + 2) / 6; break;
+          case b: h = ((r - g) / d + 4) / 6; break;
+        }
+        h *= 360;
+      }
+      return { hue: h, saturation: s, lightness: l };
+    }
+
+    function blobToBase64(blob) {
+      return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    async function analyzeWithAI(base64, apiKey, prompt) {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          max_tokens: 150,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'low' } }
+            ]
+          }]
+        })
+      });
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content?.trim() || null;
+    }
+  </script>
+</body>
+</html>

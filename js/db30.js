@@ -1,7 +1,7 @@
 // PouchDB-based storage with live sync
 // Replaces the old raw IndexedDB wrapper — same public API
 
-const db = new PouchDB('wardrobe_phone2');
+const db = new PouchDB('wardrobe_sync');
 
 let remoteDB = null;
 let syncHandler = null;
@@ -118,6 +118,14 @@ export async function repairImages(progressCb) {
   let fixed = 0, total = result.rows.length;
   for (const row of result.rows) {
     const doc = row.doc;
+    // Fix wrong field name: "data" instead of "dataUrl"
+    if (!doc.dataUrl && doc.data && typeof doc.data === 'string' && doc.data.startsWith('data:')) {
+      const latest = await db.get(doc._id);
+      await db.put({ _id: doc._id, _rev: latest._rev, type: 'images', dataUrl: doc.data });
+      fixed++;
+      if (progressCb) progressCb(fixed, total);
+      continue;
+    }
     // Check if dataUrl is valid (not "[object Blob]" garbage)
     if (doc.dataUrl && doc.dataUrl.length > 100 && !doc.dataUrl.includes('[object')) {
       if (progressCb) progressCb(++fixed, total);

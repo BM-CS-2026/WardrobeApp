@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto Reload Shoes & Belts</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 24px; max-width: 600px; margin: 0 auto; background: #f5f5f7; }
+    h1 { font-size: 22px; }
+    #status { padding: 16px; background: white; border-radius: 12px; margin: 16px 0; font-size: 15px; font-weight: 600; }
+    #log { background: white; border-radius: 12px; padding: 12px; font-size: 11px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; line-height: 1.4; }
+    .done { color: #22c55e; }
+    .err { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <h1>Auto Reload: Shoes & Belts</h1>
+  <div id="status">Starting...</div>
+  <div id="log"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+  <script>
+    const db = new PouchDB('wardrobe_sync');
+    function makeId(s, k) { return `${s}:${k}`; }
+
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    function log(m) { logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+    function setStatus(m) { statusEl.textContent = m; }
+
+    function rgbToHsl(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h, s, l = (max + min) / 2;
+      if (max === min) { h = s = 0; }
+      else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+          case g: h = ((b - r) / d + 2) / 6; break;
+          case b: h = ((r - g) / d + 4) / 6; break;
+        }
+        h *= 360;
+      }
+      return { hue: h, saturation: s, lightness: l };
+    }
+
+    async function getApiKey() {
+      try { return (await db.get('settings:openai_key')).value; }
+      catch { return localStorage.getItem('openai_key'); }
+    }
+
+    async function aiDescribe(base64, apiKey, category) {
+      const prompt = category === 'shoes'
+        ? 'Describe this pair of shoes in one concise sentence. Include: color, material, style (sneakers, dress shoes, boots, loafers, etc.), and key features.'
+        : 'Describe this belt in one concise sentence. Include: color, material (leather, fabric, etc.), buckle style, and key features.';
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini', max_tokens: 150,
+          messages: [{ role: 'user', content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'low' } }
+          ]}]
+        })
+      });
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content?.trim() || null;
+    }
+
+    async function deleteCategory(category) {
+      const result = await db.allDocs({ include_docs: true, startkey: 'items:', endkey: 'items:\ufff0' });
+      const matched = result.rows.filter(r => r.doc.category === category);
+      log(`  Found ${matched.length} existing ${category} to delete`);
+      for (const row of matched) {
+        if (row.doc.imageId) {
+          try { const d = await db.get(makeId('images', row.doc.imageId)); await db.remove(d); } catch {}
+        }
+        await db.remove(row.doc);
+      }
+      log(`  Deleted ${matched.length} ${category}`);
+    }
+
+    async function importFile(url, category, apiKey) {
+      const resp = await fetch(url);
+      const origBlob = await resp.blob();
+
+      // Resize via canvas
+      const img = await new Promise((res, rej) => {
+        const i = new Image(); i.onload = () => res(i); i.onerror = rej;
+        i.src = URL.createObjectURL(origBlob);
+      });
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(800 / img.width, 800 / img.height, 1);
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.75));
+
+      // Color from center
+      const cx = canvas.width / 2, cy = canvas.height / 2;
+      const sz = Math.round(Math.min(canvas.width, canvas.height) * 0.4);
+      const d = ctx.getImageData(cx - sz/2, cy - sz/2, sz, sz).data;
+      let rS=0, gS=0, bS=0, c=0;
+      for (let p=0; p<d.length; p+=4) { rS+=d[p]; gS+=d[p+1]; bS+=d[p+2]; c++; }
+      const dominant = rgbToHsl(rS/c, gS/c, bS/c);
+
+      // AI description
+      let name = category + ' item';
+      if (apiKey) {
+        try {
+          const b64 = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r(rd.result.split(',')[1]); rd.readAsDataURL(blob); });
+          const desc = await aiDescribe(b64, apiKey, category);
+          if (desc) name = desc;
+        } catch (e) { log(`    AI error: ${e.message}`); }
+      }
+
+      // Save to PouchDB
+      const id = crypto.randomUUID();
+      const imageId = crypto.randomUUID();
+      const dataUrl = await new Promise(r => { const rd = new FileReader(); rd.onloadend = () => r(rd.result); rd.readAsDataURL(blob); });
+
+      await db.put({ _id: makeId('images', imageId), type: 'images', dataUrl });
+      await db.put({ _id: makeId('items', id), type: 'items', name, category, colorProfile: { dominantColor: dominant, secondaryColors: [], averageColor: dominant }, imageId, dateAdded: Date.now(), styleTags: [] });
+
+      return name;
+    }
+
+    // ── Main ──
+    (async () => {
+      try {
+        const apiKey = await getApiKey();
+        log(apiKey ? 'API key found' : 'No API key — will use generic names');
+
+        // Load manifest
+        const manifest = await (await fetch('temp_import/manifest.json')).json();
+
+        // ── SHOES ──
+        setStatus('Deleting old shoes...');
+        log('\n=== SHOES ===');
+        await deleteCategory('shoes');
+
+        setStatus(`Importing ${manifest.shoes.length} shoes...`);
+        for (let i = 0; i < manifest.shoes.length; i++) {
+          const file = manifest.shoes[i];
+          setStatus(`Importing shoe ${i+1}/${manifest.shoes.length}...`);
+          log(`  [${i+1}/${manifest.shoes.length}] ${file}`);
+          try {
+            const name = await importFile(`temp_import/shoes/${file}`, 'shoes', apiKey);
+            log(`    -> ${name.substring(0, 70)}`);
+          } catch (e) {
+            log(`    ERROR: ${e.message}`);
+          }
+        }
+
+        // ── BELTS ──
+        setStatus('Deleting old belts...');
+        log('\n=== BELTS ===');
+        await deleteCategory('belt');
+
+        setStatus(`Importing ${manifest.belts.length} belts...`);
+        for (let i = 0; i < manifest.belts.length; i++) {
+          const file = manifest.belts[i];
+          setStatus(`Importing belt ${i+1}/${manifest.belts.length}...`);
+          log(`  [${i+1}/${manifest.belts.length}] ${file}`);
+          try {
+            const name = await importFile(`temp_import/belts/${file}`, 'belt', apiKey);
+            log(`    -> ${name.substring(0, 70)}`);
+          } catch (e) {
+            log(`    ERROR: ${e.message}`);
+          }
+        }
+
+        setStatus('All done! Refresh the main app.');
+        log('\n=== COMPLETE ===');
+        log('Refresh localhost:8080 to see all new shoes and belts.');
+
+      } catch (e) {
+        setStatus('Error: ' + e.message);
+        log('FATAL: ' + e.message + '\n' + e.stack);
+      }
+    })();
+  </script>
+</body>
+</html>

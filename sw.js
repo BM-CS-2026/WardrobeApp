@@ -1,10 +1,10 @@
-const CACHE_NAME = 'wardrobe-v30';
+const CACHE_NAME = 'mystyle-v35';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
-  './js/app.js',
-  './js/db.js',
+  './js/app30.js',
+  './js/db30.js',
   './js/models.js',
   './js/color-engine.js',
   './js/outfit-generator.js',
