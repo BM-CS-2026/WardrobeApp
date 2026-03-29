@@ -277,19 +277,67 @@ function startSyncIfConfigured() {
 
 app.showSyncSettings = () => {
   const currentUrl = db.getSyncUrl();
+  const itemCount = items.length;
+  const outfitCount = outfits.filter(o => o.isSaved).length;
   openSheet(`
-    <h2>Cloud Sync</h2>
-    <p style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
-      Enter your Cloudant database URL to sync between devices.<br>
-      Format: <code style="font-size:11px">https://apikey:pass@account.cloudantnosqldb.appdomain.cloud/wardrobe</code>
-    </p>
-    <div class="form-group">
-      <input id="sync-url-input" type="url" placeholder="https://..." value="${currentUrl}" style="font-size:13px">
+    <h2>Settings & Troubleshooting</h2>
+
+    <!-- Status -->
+    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:8px">Status</div>
+      <div style="font-size:13px;display:flex;justify-content:space-between;margin-bottom:4px">
+        <span>Items</span><strong>${itemCount}</strong>
+      </div>
+      <div style="font-size:13px;display:flex;justify-content:space-between;margin-bottom:4px">
+        <span>Outfits</span><strong>${outfitCount}</strong>
+      </div>
+      <div style="font-size:13px;display:flex;justify-content:space-between">
+        <span>Sync</span><strong>${currentUrl ? '✅ Connected' : '❌ Not configured'}</strong>
+      </div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-primary" onclick="app.saveSyncUrl()" style="flex:1">Save & Sync</button>
-      ${currentUrl ? '<button class="btn btn-secondary" onclick="app.disconnectSync()" style="flex:1">Disconnect</button>' : ''}
+
+    <!-- Cloud Sync -->
+    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:8px">Cloud Sync</div>
+      <div class="form-group" style="margin-bottom:8px">
+        <input id="sync-url-input" type="url" placeholder="https://apikey:pass@...cloudant.../wardrobe" value="${currentUrl}" style="font-size:12px">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="app.saveSyncUrl()" style="flex:1">Save & Sync</button>
+        ${currentUrl ? '<button class="btn btn-secondary btn-sm" onclick="app.disconnectSync()" style="flex:1">Disconnect</button>' : ''}
+      </div>
     </div>
+
+    <!-- Fix Tools -->
+    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:8px">Fix Issues</div>
+
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.forceResync()">
+        🔄 Force Re-sync (pull all data)
+      </button>
+
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.clearCacheReload()">
+        🧹 Clear Cache & Reload App
+      </button>
+
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.repairImages()">
+        🖼️ Repair Broken Images
+      </button>
+
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.showDbStats()">
+        📊 Show Database Details
+      </button>
+    </div>
+
+    <!-- Links -->
+    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:8px">Diagnostic Tools</div>
+      <a href="sync-check.html" style="display:block;padding:8px 0;font-size:13px;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--border)">🔗 Sync Check Page</a>
+      <a href="auto-reload.html" style="display:block;padding:8px 0;font-size:13px;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--border)">🔗 Reload Shoes & Belts</a>
+      <a href="reload-shoes.html" style="display:block;padding:8px 0;font-size:13px;color:var(--accent);text-decoration:none">🔗 Manual Item Import</a>
+    </div>
+
+    <button class="btn btn-secondary" onclick="closeSheet()">Close</button>
   `);
 };
 
@@ -318,6 +366,74 @@ app.disconnectSync = () => {
   db.setSyncUrl('');
   setSyncDot('off');
   closeSheet();
+};
+
+app.forceResync = async () => {
+  const url = db.getSyncUrl();
+  if (!url) { alert('No sync URL configured. Tap the dot to set one.'); return; }
+  closeSheet();
+  showLoading('Pulling all data from cloud...');
+  try {
+    const result = await db.pullOnce(url, (info) => {
+      document.getElementById('loading-msg').textContent = `Pulling... ${info.docs_written} docs`;
+    });
+    await loadData();
+    renderCurrentTab();
+    hideLoading();
+    alert(`Sync complete! Pulled ${result.docs_written} docs. Now showing ${items.length} items.`);
+  } catch (e) {
+    hideLoading();
+    alert('Sync failed: ' + e.message);
+  }
+};
+
+app.clearCacheReload = async () => {
+  // Unregister service workers and clear all caches
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) await r.unregister();
+  }
+  const keys = await caches.keys();
+  for (const k of keys) await caches.delete(k);
+  alert('Cache cleared! App will reload with fresh files.');
+  location.reload(true);
+};
+
+app.repairImages = async () => {
+  closeSheet();
+  showLoading('Repairing images...');
+  const fixed = await db.repairImages((done, total) => {
+    document.getElementById('loading-msg').textContent = `Repairing... ${done}/${total}`;
+  });
+  hideLoading();
+  alert(`Repaired ${fixed} images.`);
+  renderCurrentTab();
+};
+
+app.showDbStats = async () => {
+  closeSheet();
+  showLoading('Checking database...');
+  const allDocs = await db.getAllItems();
+  const allOutfits = await db.getAllOutfits();
+  const allPalettes = await db.getAllPalettes();
+  hideLoading();
+  const cats = {};
+  for (const item of allDocs) {
+    cats[item.category] = (cats[item.category] || 0) + 1;
+  }
+  openSheet(`
+    <h2>Database Details</h2>
+    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px">Items: ${allDocs.length}</div>
+      ${Object.entries(cats).map(([k, v]) => `<div style="font-size:13px;display:flex;justify-content:space-between;padding:2px 0"><span>${k}</span><strong>${v}</strong></div>`).join('')}
+    </div>
+    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="font-size:13px">Outfits: <strong>${allOutfits.length}</strong></div>
+      <div style="font-size:13px">Palettes: <strong>${allPalettes.length}</strong></div>
+      <div style="font-size:13px">Sync URL: <strong>${db.getSyncUrl() ? 'Set' : 'Not set'}</strong></div>
+    </div>
+    <button class="btn btn-secondary" onclick="closeSheet()">Close</button>
+  `);
 };
 
 async function loadData() {
