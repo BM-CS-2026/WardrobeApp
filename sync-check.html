@@ -1,41 +1,51 @@
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sync Check</title>
+<title>Sync & Fix</title>
 <style>body{font-family:-apple-system,sans-serif;padding:20px;max-width:500px;margin:0 auto;background:#f5f5f7}
 .card{background:white;border-radius:12px;padding:16px;margin:12px 0}
 .btn{display:block;width:100%;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin:8px 0}
 .btn-blue{background:#4874d4;color:white}
 .btn-green{background:#22c55e;color:white}
 .btn-red{background:#ef4444;color:white}
-#log{background:white;border-radius:10px;padding:12px;font-size:11px;max-height:400px;overflow-y:auto;white-space:pre-wrap;font-family:monospace}
+#log{background:white;border-radius:10px;padding:12px;font-size:11px;max-height:500px;overflow-y:auto;white-space:pre-wrap;font-family:monospace}
 h1{font-size:20px} .num{font-size:28px;font-weight:700;color:#4874d4}
 input{width:100%;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:12px;margin:6px 0;box-sizing:border-box}
 </style></head><body>
-<h1>Sync Diagnostic</h1>
+<h1>My Style — Sync & Fix</h1>
+
 <div class="card">
   <div>Local items: <span class="num" id="local-count">...</span></div>
   <div>Local outfits: <span class="num" id="local-outfits">...</span></div>
   <div>Local images: <span class="num" id="local-images">...</span></div>
 </div>
+
 <div class="card">
   <strong>Sync URL:</strong>
-  <input id="sync-url-display" readonly>
-  <button class="btn btn-blue" onclick="fixAndPush()" style="margin-top:8px">Fix URL + Push to Cloudant</button>
-  <button class="btn btn-blue" onclick="forcePull()">Force Pull from Cloudant</button>
-  <button class="btn btn-green" onclick="checkRemote()">Check Remote DB Count</button>
+  <input id="sync-url-input" placeholder="Paste Cloudant URL here...">
+  <button class="btn btn-green" onclick="saveUrlAndPull()">Save URL & Pull All Data</button>
 </div>
+
+<div class="card">
+  <button class="btn btn-blue" onclick="forcePull()">Force Pull from Cloud</button>
+  <button class="btn btn-blue" onclick="forcePush()">Force Push to Cloud</button>
+  <button class="btn btn-blue" onclick="checkRemote()">Check Remote DB</button>
+  <button class="btn btn-red" onclick="nukeCache()">Nuke All Caches & Reload</button>
+</div>
+
+<div class="card">
+  <a href="./" style="display:block;text-align:center;font-size:15px;font-weight:600;color:#4874d4;text-decoration:none;padding:10px">← Back to My Style App</a>
+</div>
+
 <div id="log"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
 <script>
 const localDB = new PouchDB('wardrobe_sync');
 
 function log(m){const l=document.getElementById('log');l.textContent+=m+'\n';l.scrollTop=l.scrollHeight}
 
-function getCleanUrl() {
-  let url = localStorage.getItem('sync_remote_url') || '';
-  // Remove any spaces that got into the URL
-  url = url.replace(/\s+/g, '');
-  return url;
+function getUrl() {
+  return (document.getElementById('sync-url-input').value || '').replace(/\s+/g, '');
 }
 
 function makeRemote(rawUrl) {
@@ -46,16 +56,14 @@ function makeRemote(rawUrl) {
       const user = decodeURIComponent(p.username);
       const pass = decodeURIComponent(p.password);
       const creds = btoa(user + ':' + pass);
-      p.username = '';
-      p.password = '';
+      p.username = ''; p.password = '';
       const cleanUrl = p.toString();
-      log('  Clean URL: ' + cleanUrl.substring(0, 50) + '...');
-      log('  Auth: Basic ' + creds.substring(0, 10) + '...');
+      log('  Auth URL: ' + cleanUrl.substring(0, 50) + '...');
       return new PouchDB(cleanUrl, {
         fetch: function(fetchUrl, opts) {
           opts = opts || {};
-          opts.headers = opts.headers || {};
-          if (typeof opts.headers.set === 'function') {
+          if (!opts.headers) opts.headers = {};
+          if (opts.headers instanceof Headers) {
             opts.headers.set('Authorization', 'Basic ' + creds);
           } else {
             opts.headers['Authorization'] = 'Basic ' + creds;
@@ -64,9 +72,7 @@ function makeRemote(rawUrl) {
         }
       });
     }
-  } catch(e) {
-    log('  URL parse error: ' + e.message);
-  }
+  } catch(e) { log('  URL parse error: ' + e.message); }
   return new PouchDB(url);
 }
 
@@ -77,57 +83,81 @@ async function check() {
   document.getElementById('local-count').textContent = items.rows.length;
   document.getElementById('local-outfits').textContent = outfits.rows.length;
   document.getElementById('local-images').textContent = images.rows.length;
-  const url = getCleanUrl();
-  document.getElementById('sync-url-display').value = url;
+  // Load saved URL
+  const savedUrl = (localStorage.getItem('sync_remote_url') || '').replace(/\s+/g, '');
+  document.getElementById('sync-url-input').value = savedUrl;
   log('Local: ' + items.rows.length + ' items, ' + outfits.rows.length + ' outfits, ' + images.rows.length + ' images');
 }
 
-async function fixAndPush() {
-  let url = getCleanUrl();
-  if (!url) { log('No sync URL!'); return; }
-  // Save cleaned URL back
+async function saveUrlAndPull() {
+  const url = getUrl();
+  if (!url) { alert('Please paste the Cloudant URL first'); return; }
   localStorage.setItem('sync_remote_url', url);
-  log('\nFixed URL (removed spaces): ' + url.substring(0, 50) + '...');
-  log('Pushing to remote...');
-  try {
-    const remote = makeRemote(url);
-    // Test connection first
-    const info = await remote.info();
-    log('Connected! Remote has ' + info.doc_count + ' docs');
-    const result = await localDB.replicate.to(remote);
-    log('Push complete: ' + result.docs_written + ' docs written');
-  } catch(e) {
-    log('Push error: ' + e.message);
-    log('Full error: ' + JSON.stringify(e));
-  }
+  log('\nURL saved! Starting pull...');
+  await forcePull();
 }
 
 async function forcePull() {
-  const url = getCleanUrl();
-  if (!url) { log('No sync URL!'); return; }
-  localStorage.setItem('sync_remote_url', url);
-  log('\nPulling from remote...');
+  const url = getUrl() || (localStorage.getItem('sync_remote_url') || '').replace(/\s+/g, '');
+  if (!url) { log('No URL!'); return; }
+  log('\nPulling from cloud...');
   try {
     const remote = makeRemote(url);
+    // Test connection
+    const info = await remote.info();
+    log('Connected! Remote has ' + info.doc_count + ' docs');
+    // Pull
     const result = await localDB.replicate.from(remote);
-    log('Pull complete: ' + result.docs_written + ' docs written');
-    check();
-  } catch(e) { log('Pull error: ' + e.message); }
+    log('PULL COMPLETE: ' + result.docs_written + ' docs written');
+    await check();
+    log('\n*** SUCCESS — go back to the app and it should show all items ***');
+  } catch(e) {
+    log('PULL ERROR: ' + e.message);
+    log('Details: ' + JSON.stringify(e).substring(0, 200));
+  }
+}
+
+async function forcePush() {
+  const url = getUrl() || (localStorage.getItem('sync_remote_url') || '').replace(/\s+/g, '');
+  if (!url) { log('No URL!'); return; }
+  log('\nPushing to cloud...');
+  try {
+    const remote = makeRemote(url);
+    const info = await remote.info();
+    log('Connected! Remote has ' + info.doc_count + ' docs');
+    const result = await localDB.replicate.to(remote);
+    log('PUSH COMPLETE: ' + result.docs_written + ' docs written');
+  } catch(e) {
+    log('PUSH ERROR: ' + e.message);
+    log('Details: ' + JSON.stringify(e).substring(0, 200));
+  }
 }
 
 async function checkRemote() {
-  const url = getCleanUrl();
-  if (!url) { log('No sync URL!'); return; }
+  const url = getUrl() || (localStorage.getItem('sync_remote_url') || '').replace(/\s+/g, '');
+  if (!url) { log('No URL!'); return; }
   log('\nChecking remote...');
   try {
     const remote = makeRemote(url);
     const info = await remote.info();
-    log('Remote DB: ' + info.doc_count + ' total docs');
+    log('Remote: ' + info.doc_count + ' total docs');
     const items = await remote.allDocs({startkey:'items:',endkey:'items:\ufff0'});
-    const images = await remote.allDocs({startkey:'images:',endkey:'images:\ufff0'});
     const outfits = await remote.allDocs({startkey:'outfits:',endkey:'outfits:\ufff0'});
+    const images = await remote.allDocs({startkey:'images:',endkey:'images:\ufff0'});
     log('Remote: ' + items.rows.length + ' items, ' + outfits.rows.length + ' outfits, ' + images.rows.length + ' images');
-  } catch(e) { log('Error: ' + e.message + '\n' + JSON.stringify(e)); }
+  } catch(e) { log('ERROR: ' + e.message); }
+}
+
+async function nukeCache() {
+  log('\nNuking all caches...');
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) { await r.unregister(); log('  Unregistered SW'); }
+  }
+  const keys = await caches.keys();
+  for (const k of keys) { await caches.delete(k); log('  Deleted cache: ' + k); }
+  log('All caches cleared! Reloading...');
+  setTimeout(() => location.reload(true), 1000);
 }
 
 check();
