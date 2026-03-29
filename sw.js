@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mystyle-v37';
+const CACHE_NAME = 'mystyle-v38';
 const ASSETS = [
   './',
   './index.html',
@@ -15,26 +15,31 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)));
+  // Skip waiting — take over immediately
   self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(c => c.addAll(ASSETS).catch(() => {}))
+  );
 });
 
 self.addEventListener('activate', e => {
+  // Delete ALL old caches immediately
   e.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Network-first: always try to get fresh files, fall back to cache when offline
+// Network-first: always try fresh, cache as fallback for offline
 self.addEventListener('fetch', e => {
   e.respondWith(
     fetch(e.request)
       .then(response => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+        }
         return response;
       })
       .catch(() => caches.match(e.request))

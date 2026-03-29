@@ -23,9 +23,15 @@
       alert('JS Error: ' + e.reason);
     });
 
-    // Register service worker for offline support
+    // Force update service worker — clear old caches, register fresh
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => r.update());
+      });
+      navigator.serviceWorker.register('./sw.js?v=38').catch(() => {});
+      caches.keys().then(keys => {
+        keys.forEach(k => { if (!k.includes('v38')) caches.delete(k); });
+      });
     }
   </script>
 </head>
@@ -135,6 +141,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
-  <script type="module" src="js/app30.js"></script>
+  <script type="module" src="js/app30.js?v=37"></script>
 </body>
 </html>

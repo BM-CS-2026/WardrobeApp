@@ -1,4 +1,4 @@
-import * as db from './db30.js';
+import * as db from './db30.js?v=37';
 import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=20';
 import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=20';
 import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=20';
