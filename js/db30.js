@@ -222,7 +222,8 @@ export async function saveApiKey(key) {
 // ── Sync ──
 
 export function getSyncUrl() {
-  return localStorage.getItem('sync_remote_url') || '';
+  const url = localStorage.getItem('sync_remote_url') || '';
+  return url.replace(/\s+/g, ''); // strip any accidental spaces
 }
 
 export function setSyncUrl(url) {

@@ -6,87 +6,128 @@
 .btn{display:block;width:100%;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin:8px 0}
 .btn-blue{background:#4874d4;color:white}
 .btn-green{background:#22c55e;color:white}
-#log{background:white;border-radius:10px;padding:12px;font-size:11px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:monospace}
+.btn-red{background:#ef4444;color:white}
+#log{background:white;border-radius:10px;padding:12px;font-size:11px;max-height:400px;overflow-y:auto;white-space:pre-wrap;font-family:monospace}
 h1{font-size:20px} .num{font-size:28px;font-weight:700;color:#4874d4}
+input{width:100%;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:12px;margin:6px 0;box-sizing:border-box}
 </style></head><body>
 <h1>Sync Diagnostic</h1>
 <div class="card">
   <div>Local items: <span class="num" id="local-count">...</span></div>
   <div>Local outfits: <span class="num" id="local-outfits">...</span></div>
   <div>Local images: <span class="num" id="local-images">...</span></div>
-  <div style="margin-top:8px">Sync URL: <span id="sync-url" style="font-size:11px;word-break:break-all;color:#666">...</span></div>
 </div>
 <div class="card">
+  <strong>Sync URL:</strong>
+  <input id="sync-url-display" readonly>
+  <button class="btn btn-blue" onclick="fixAndPush()" style="margin-top:8px">Fix URL + Push to Cloudant</button>
   <button class="btn btn-blue" onclick="forcePull()">Force Pull from Cloudant</button>
-  <button class="btn btn-green" onclick="forcePush()">Force Push to Cloudant</button>
-  <button class="btn btn-blue" onclick="checkRemote()">Check Remote DB Count</button>
+  <button class="btn btn-green" onclick="checkRemote()">Check Remote DB Count</button>
 </div>
 <div id="log"></div>
 <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
 <script>
-const db = new PouchDB('wardrobe_sync');
+const localDB = new PouchDB('wardrobe_sync');
+
 function log(m){const l=document.getElementById('log');l.textContent+=m+'\n';l.scrollTop=l.scrollHeight}
 
-async function check(){
-  const items = await db.allDocs({startkey:'items:',endkey:'items:\ufff0'});
-  const outfits = await db.allDocs({startkey:'outfits:',endkey:'outfits:\ufff0'});
-  const images = await db.allDocs({startkey:'images:',endkey:'images:\ufff0'});
+function getCleanUrl() {
+  let url = localStorage.getItem('sync_remote_url') || '';
+  // Remove any spaces that got into the URL
+  url = url.replace(/\s+/g, '');
+  return url;
+}
+
+function makeRemote(rawUrl) {
+  const url = rawUrl.replace(/\s+/g, '');
+  try {
+    const p = new URL(url);
+    if (p.username) {
+      const user = decodeURIComponent(p.username);
+      const pass = decodeURIComponent(p.password);
+      const creds = btoa(user + ':' + pass);
+      p.username = '';
+      p.password = '';
+      const cleanUrl = p.toString();
+      log('  Clean URL: ' + cleanUrl.substring(0, 50) + '...');
+      log('  Auth: Basic ' + creds.substring(0, 10) + '...');
+      return new PouchDB(cleanUrl, {
+        fetch: function(fetchUrl, opts) {
+          opts = opts || {};
+          opts.headers = opts.headers || {};
+          if (typeof opts.headers.set === 'function') {
+            opts.headers.set('Authorization', 'Basic ' + creds);
+          } else {
+            opts.headers['Authorization'] = 'Basic ' + creds;
+          }
+          return PouchDB.fetch(fetchUrl, opts);
+        }
+      });
+    }
+  } catch(e) {
+    log('  URL parse error: ' + e.message);
+  }
+  return new PouchDB(url);
+}
+
+async function check() {
+  const items = await localDB.allDocs({startkey:'items:',endkey:'items:\ufff0'});
+  const outfits = await localDB.allDocs({startkey:'outfits:',endkey:'outfits:\ufff0'});
+  const images = await localDB.allDocs({startkey:'images:',endkey:'images:\ufff0'});
   document.getElementById('local-count').textContent = items.rows.length;
   document.getElementById('local-outfits').textContent = outfits.rows.length;
   document.getElementById('local-images').textContent = images.rows.length;
-  const url = localStorage.getItem('sync_remote_url')||'NOT SET';
-  document.getElementById('sync-url').textContent = url;
-  log('Local: '+items.rows.length+' items, '+outfits.rows.length+' outfits, '+images.rows.length+' images');
-  log('Sync URL: '+(url.length>10?url.substring(0,30)+'...':'NOT SET'));
+  const url = getCleanUrl();
+  document.getElementById('sync-url-display').value = url;
+  log('Local: ' + items.rows.length + ' items, ' + outfits.rows.length + ' outfits, ' + images.rows.length + ' images');
 }
 
-function makeRemoteDB(remoteUrl){
-  try{
-    const p=new URL(remoteUrl);
-    if(p.username){
-      const creds=btoa(decodeURIComponent(p.username)+':'+decodeURIComponent(p.password));
-      p.username='';p.password='';
-      return new PouchDB(p.toString(),{fetch:(u,o)=>{o=o||{};o.headers=o.headers||new Headers();if(o.headers.set)o.headers.set('Authorization','Basic '+creds);else o.headers['Authorization']='Basic '+creds;return PouchDB.fetch(u,o)}});
-    }
-  }catch(e){}
-  return new PouchDB(remoteUrl);
-}
-
-async function checkRemote(){
-  const url = localStorage.getItem('sync_remote_url');
-  if(!url){log('No sync URL set!');return}
-  log('Checking remote...');
-  try{
-    const remote = makeRemoteDB(url);
+async function fixAndPush() {
+  let url = getCleanUrl();
+  if (!url) { log('No sync URL!'); return; }
+  // Save cleaned URL back
+  localStorage.setItem('sync_remote_url', url);
+  log('\nFixed URL (removed spaces): ' + url.substring(0, 50) + '...');
+  log('Pushing to remote...');
+  try {
+    const remote = makeRemote(url);
+    // Test connection first
     const info = await remote.info();
-    log('Remote DB: '+info.doc_count+' docs, update_seq: '+info.update_seq);
+    log('Connected! Remote has ' + info.doc_count + ' docs');
+    const result = await localDB.replicate.to(remote);
+    log('Push complete: ' + result.docs_written + ' docs written');
+  } catch(e) {
+    log('Push error: ' + e.message);
+    log('Full error: ' + JSON.stringify(e));
+  }
+}
+
+async function forcePull() {
+  const url = getCleanUrl();
+  if (!url) { log('No sync URL!'); return; }
+  localStorage.setItem('sync_remote_url', url);
+  log('\nPulling from remote...');
+  try {
+    const remote = makeRemote(url);
+    const result = await localDB.replicate.from(remote);
+    log('Pull complete: ' + result.docs_written + ' docs written');
+    check();
+  } catch(e) { log('Pull error: ' + e.message); }
+}
+
+async function checkRemote() {
+  const url = getCleanUrl();
+  if (!url) { log('No sync URL!'); return; }
+  log('\nChecking remote...');
+  try {
+    const remote = makeRemote(url);
+    const info = await remote.info();
+    log('Remote DB: ' + info.doc_count + ' total docs');
     const items = await remote.allDocs({startkey:'items:',endkey:'items:\ufff0'});
     const images = await remote.allDocs({startkey:'images:',endkey:'images:\ufff0'});
-    log('Remote items: '+items.rows.length+', images: '+images.rows.length);
-  }catch(e){log('Error: '+e.message)}
-}
-
-async function forcePull(){
-  const url = localStorage.getItem('sync_remote_url');
-  if(!url){log('No sync URL!');return}
-  log('Pulling from remote...');
-  try{
-    const remote = makeRemoteDB(url);
-    const result = await db.replicate.from(remote);
-    log('Pull complete: '+result.docs_written+' docs written');
-    check();
-  }catch(e){log('Pull error: '+e.message)}
-}
-
-async function forcePush(){
-  const url = localStorage.getItem('sync_remote_url');
-  if(!url){log('No sync URL!');return}
-  log('Pushing to remote...');
-  try{
-    const remote = makeRemoteDB(url);
-    const result = await db.replicate.to(remote);
-    log('Push complete: '+result.docs_written+' docs written');
-  }catch(e){log('Push error: '+e.message)}
+    const outfits = await remote.allDocs({startkey:'outfits:',endkey:'outfits:\ufff0'});
+    log('Remote: ' + items.rows.length + ' items, ' + outfits.rows.length + ' outfits, ' + images.rows.length + ' images');
+  } catch(e) { log('Error: ' + e.message + '\n' + JSON.stringify(e)); }
 }
 
 check();
