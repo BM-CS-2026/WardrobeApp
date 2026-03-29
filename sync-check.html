@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sync Check</title>
+<style>body{font-family:-apple-system,sans-serif;padding:20px;max-width:500px;margin:0 auto;background:#f5f5f7}
+.card{background:white;border-radius:12px;padding:16px;margin:12px 0}
+.btn{display:block;width:100%;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin:8px 0}
+.btn-blue{background:#4874d4;color:white}
+.btn-green{background:#22c55e;color:white}
+#log{background:white;border-radius:10px;padding:12px;font-size:11px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:monospace}
+h1{font-size:20px} .num{font-size:28px;font-weight:700;color:#4874d4}
+</style></head><body>
+<h1>Sync Diagnostic</h1>
+<div class="card">
+  <div>Local items: <span class="num" id="local-count">...</span></div>
+  <div>Local outfits: <span class="num" id="local-outfits">...</span></div>
+  <div>Local images: <span class="num" id="local-images">...</span></div>
+  <div style="margin-top:8px">Sync URL: <span id="sync-url" style="font-size:11px;word-break:break-all;color:#666">...</span></div>
+</div>
+<div class="card">
+  <button class="btn btn-blue" onclick="forcePull()">Force Pull from Cloudant</button>
+  <button class="btn btn-green" onclick="forcePush()">Force Push to Cloudant</button>
+  <button class="btn btn-blue" onclick="checkRemote()">Check Remote DB Count</button>
+</div>
+<div id="log"></div>
+<script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+<script>
+const db = new PouchDB('wardrobe_sync');
+function log(m){const l=document.getElementById('log');l.textContent+=m+'\n';l.scrollTop=l.scrollHeight}
+
+async function check(){
+  const items = await db.allDocs({startkey:'items:',endkey:'items:\ufff0'});
+  const outfits = await db.allDocs({startkey:'outfits:',endkey:'outfits:\ufff0'});
+  const images = await db.allDocs({startkey:'images:',endkey:'images:\ufff0'});
+  document.getElementById('local-count').textContent = items.rows.length;
+  document.getElementById('local-outfits').textContent = outfits.rows.length;
+  document.getElementById('local-images').textContent = images.rows.length;
+  const url = localStorage.getItem('sync_remote_url')||'NOT SET';
+  document.getElementById('sync-url').textContent = url;
+  log('Local: '+items.rows.length+' items, '+outfits.rows.length+' outfits, '+images.rows.length+' images');
+  log('Sync URL: '+(url.length>10?url.substring(0,30)+'...':'NOT SET'));
+}
+
+async function checkRemote(){
+  const url = localStorage.getItem('sync_remote_url');
+  if(!url){log('No sync URL set!');return}
+  log('Checking remote...');
+  try{
+    const remote = new PouchDB(url);
+    const info = await remote.info();
+    log('Remote DB: '+info.doc_count+' docs, update_seq: '+info.update_seq);
+    const items = await remote.allDocs({startkey:'items:',endkey:'items:\ufff0'});
+    const images = await remote.allDocs({startkey:'images:',endkey:'images:\ufff0'});
+    log('Remote items: '+items.rows.length+', images: '+images.rows.length);
+  }catch(e){log('Error: '+e.message)}
+}
+
+async function forcePull(){
+  const url = localStorage.getItem('sync_remote_url');
+  if(!url){log('No sync URL!');return}
+  log('Pulling from remote...');
+  try{
+    const remote = new PouchDB(url);
+    const result = await db.replicate.from(remote);
+    log('Pull complete: '+result.docs_written+' docs written');
+    check();
+  }catch(e){log('Pull error: '+e.message)}
+}
+
+async function forcePush(){
+  const url = localStorage.getItem('sync_remote_url');
+  if(!url){log('No sync URL!');return}
+  log('Pushing to remote...');
+  try{
+    const remote = new PouchDB(url);
+    const result = await db.replicate.to(remote);
+    log('Push complete: '+result.docs_written+' docs written');
+  }catch(e){log('Push error: '+e.message)}
+}
+
+check();
+</script></body></html>
