@@ -223,11 +223,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (syncUrl) {
     showLoading('Syncing data...');
     try {
-      await db.pullOnce(syncUrl, (info) => {
+      const syncResult = await db.pullOnce(syncUrl, (info) => {
         document.getElementById('loading-msg').textContent = `Syncing... ${info.docs_written} docs`;
       });
+      console.log('[Sync] Pull complete:', syncResult.docs_written, 'docs written');
     } catch (e) {
-      console.warn('[Sync] Initial pull failed:', e);
+      console.error('[Sync] Initial pull failed:', e);
+      document.getElementById('loading-msg').textContent = 'Sync failed - loading local data...';
+      await new Promise(r => setTimeout(r, 1500));
     }
     hideLoading();
   }
