@@ -28,9 +28,9 @@
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(r => r.update());
       });
-      navigator.serviceWorker.register('./sw.js?v=39').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=40').catch(() => {});
       caches.keys().then(keys => {
-        keys.forEach(k => { if (!k.includes('v39')) caches.delete(k); });
+        keys.forEach(k => { if (!k.includes('v40')) caches.delete(k); });
       });
     }
   </script>
@@ -141,6 +141,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
-  <script type="module" src="js/app30.js?v=39"></script>
+  <script type="module" src="js/app30.js?v=40"></script>
 </body>
 </html>

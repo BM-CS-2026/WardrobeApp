@@ -1,4 +1,4 @@
-import * as db from './db30.js?v=39';
+import * as db from './db30.js?v=40';
 import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=20';
 import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=20';
 import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=20';
@@ -313,11 +313,23 @@ app.showSyncSettings = () => {
       <div style="font-weight:700;margin-bottom:8px">Fix Issues</div>
 
       <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.forceResync()">
-        🔄 Force Re-sync (pull all data)
+        🔄 Force Pull (download all data from cloud)
+      </button>
+
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.forcePushToCloud()">
+        ☁️ Force Push (upload all data to cloud)
+      </button>
+
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.checkRemoteDb()">
+        📡 Check Remote Database
       </button>
 
       <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.clearCacheReload()">
         🧹 Clear Cache & Reload App
+      </button>
+
+      <button class="btn btn-sm btn-danger" style="margin-bottom:6px" onclick="app.nukeCacheReload()">
+        💣 Nuke All Caches & Reload
       </button>
 
       <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.repairImages()">
@@ -329,15 +341,9 @@ app.showSyncSettings = () => {
       </button>
     </div>
 
-    <!-- Links -->
-    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px">
-      <div style="font-weight:700;margin-bottom:8px">Diagnostic Tools</div>
-      <a href="sync-check.html" style="display:block;padding:8px 0;font-size:13px;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--border)">🔗 Sync Check Page</a>
-      <a href="auto-reload.html" style="display:block;padding:8px 0;font-size:13px;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--border)">🔗 Reload Shoes & Belts</a>
-      <a href="reload-shoes.html" style="display:block;padding:8px 0;font-size:13px;color:var(--accent);text-decoration:none">🔗 Manual Item Import</a>
-    </div>
+    <div id="troubleshoot-log" style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px;font-size:11px;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow-y:auto;display:none"></div>
 
-    <button class="btn btn-secondary" onclick="closeSheet()">Close</button>
+    <button class="btn btn-secondary" onclick="closeSheet()">‹ Back</button>
   `);
 };
 
@@ -387,19 +393,72 @@ app.forceResync = async () => {
   }
 };
 
+function tsLog(msg) {
+  const el = document.getElementById('troubleshoot-log');
+  if (el) {
+    el.style.display = 'block';
+    el.textContent += msg + '\n';
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+app.forcePushToCloud = async () => {
+  const url = db.getSyncUrl();
+  if (!url) { alert('No sync URL configured.'); return; }
+  tsLog('Pushing to cloud...');
+  try {
+    const result = await db.pushOnce(url);
+    tsLog('PUSH COMPLETE: ' + result.docs_written + ' docs written');
+    alert('Push complete! ' + result.docs_written + ' docs uploaded.');
+  } catch (e) {
+    tsLog('PUSH ERROR: ' + e.message);
+    alert('Push failed: ' + e.message);
+  }
+};
+
+app.checkRemoteDb = async () => {
+  const url = db.getSyncUrl();
+  if (!url) { alert('No sync URL configured.'); return; }
+  tsLog('Checking remote...');
+  try {
+    const info = await db.checkRemote(url);
+    tsLog('Remote: ' + info.doc_count + ' docs');
+    tsLog('Items: ' + info.items + ', Outfits: ' + info.outfits + ', Images: ' + info.images);
+    alert(`Remote DB:\n${info.doc_count} total docs\n${info.items} items\n${info.outfits} outfits\n${info.images} images`);
+  } catch (e) {
+    tsLog('ERROR: ' + e.message);
+    alert('Check failed: ' + e.message);
+  }
+};
+
 app.clearCacheReload = async () => {
-  // Unregister service workers and clear all caches
   if ('serviceWorker' in navigator) {
     const regs = await navigator.serviceWorker.getRegistrations();
     for (const r of regs) await r.unregister();
   }
   const keys = await caches.keys();
   for (const k of keys) await caches.delete(k);
-  alert('Cache cleared! App will reload with fresh files.');
+  alert('Cache cleared! App will reload.');
+  location.reload(true);
+};
+
+app.nukeCacheReload = async () => {
+  tsLog('Nuking ALL caches and service workers...');
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) { await r.unregister(); tsLog('  Unregistered SW'); }
+  }
+  const keys = await caches.keys();
+  for (const k of keys) { await caches.delete(k); tsLog('  Deleted: ' + k); }
+  // Clear sessionStorage too
+  sessionStorage.clear();
+  tsLog('All caches nuked! Reloading...');
+  alert('All caches destroyed! App will reload with completely fresh files.');
   location.reload(true);
 };
 
 app.repairImages = async () => {
+  tsLog('Repairing images...');
   closeSheet();
   showLoading('Repairing images...');
   const fixed = await db.repairImages((done, total) => {
@@ -411,29 +470,17 @@ app.repairImages = async () => {
 };
 
 app.showDbStats = async () => {
-  closeSheet();
-  showLoading('Checking database...');
   const allDocs = await db.getAllItems();
   const allOutfits = await db.getAllOutfits();
   const allPalettes = await db.getAllPalettes();
-  hideLoading();
   const cats = {};
   for (const item of allDocs) {
     cats[item.category] = (cats[item.category] || 0) + 1;
   }
-  openSheet(`
-    <h2>Database Details</h2>
-    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
-      <div style="font-size:14px;font-weight:700;margin-bottom:8px">Items: ${allDocs.length}</div>
-      ${Object.entries(cats).map(([k, v]) => `<div style="font-size:13px;display:flex;justify-content:space-between;padding:2px 0"><span>${k}</span><strong>${v}</strong></div>`).join('')}
-    </div>
-    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
-      <div style="font-size:13px">Outfits: <strong>${allOutfits.length}</strong></div>
-      <div style="font-size:13px">Palettes: <strong>${allPalettes.length}</strong></div>
-      <div style="font-size:13px">Sync URL: <strong>${db.getSyncUrl() ? 'Set' : 'Not set'}</strong></div>
-    </div>
-    <button class="btn btn-secondary" onclick="closeSheet()">Close</button>
-  `);
+  const catLines = Object.entries(cats).map(([k, v]) => `  ${k}: ${v}`).join('\n');
+  const msg = `Items: ${allDocs.length}\n${catLines}\nOutfits: ${allOutfits.length}\nPalettes: ${allPalettes.length}\nSync URL: ${db.getSyncUrl() ? 'Yes' : 'No'}`;
+  tsLog(msg);
+  alert(msg);
 };
 
 async function loadData() {

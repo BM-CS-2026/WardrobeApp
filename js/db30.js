@@ -277,6 +277,24 @@ export function pullOnce(remoteUrl, onProgress) {
   });
 }
 
+export function pushOnce(remoteUrl) {
+  const remote = makeRemoteDB(remoteUrl);
+  return new Promise((resolve, reject) => {
+    db.replicate.to(remote, { batch_size: 25 })
+      .on('complete', (info) => resolve(info))
+      .on('error', (err) => reject(err));
+  });
+}
+
+export async function checkRemote(remoteUrl) {
+  const remote = makeRemoteDB(remoteUrl);
+  const info = await remote.info();
+  const items = await remote.allDocs({startkey:'items:',endkey:'items:\ufff0'});
+  const outfits = await remote.allDocs({startkey:'outfits:',endkey:'outfits:\ufff0'});
+  const images = await remote.allDocs({startkey:'images:',endkey:'images:\ufff0'});
+  return { doc_count: info.doc_count, items: items.rows.length, outfits: outfits.rows.length, images: images.rows.length };
+}
+
 export function setupSync(remoteUrl, onChange) {
   if (syncHandler) syncHandler.cancel();
   _onSyncChange = onChange;
