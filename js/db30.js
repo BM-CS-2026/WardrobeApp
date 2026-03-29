@@ -230,8 +230,31 @@ export function setSyncUrl(url) {
   else localStorage.removeItem('sync_remote_url');
 }
 
+function makeRemoteDB(remoteUrl) {
+  // PouchDB 8+ rejects URLs with embedded credentials
+  // Parse them out and pass via fetch headers
+  try {
+    const parsed = new URL(remoteUrl);
+    if (parsed.username) {
+      const creds = btoa(`${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`);
+      parsed.username = '';
+      parsed.password = '';
+      return new PouchDB(parsed.toString(), {
+        fetch: (url, opts) => {
+          opts = opts || {};
+          opts.headers = opts.headers || new Headers();
+          if (opts.headers.set) opts.headers.set('Authorization', 'Basic ' + creds);
+          else opts.headers['Authorization'] = 'Basic ' + creds;
+          return PouchDB.fetch(url, opts);
+        }
+      });
+    }
+  } catch (e) {}
+  return new PouchDB(remoteUrl);
+}
+
 export function pullOnce(remoteUrl, onProgress) {
-  const remote = new PouchDB(remoteUrl);
+  const remote = makeRemoteDB(remoteUrl);
   return new Promise((resolve, reject) => {
     db.replicate.from(remote, { batch_size: 25 })
       .on('change', (info) => { if (onProgress) onProgress(info); })
@@ -243,7 +266,7 @@ export function pullOnce(remoteUrl, onProgress) {
 export function setupSync(remoteUrl, onChange) {
   if (syncHandler) syncHandler.cancel();
   _onSyncChange = onChange;
-  remoteDB = new PouchDB(remoteUrl);
+  remoteDB = makeRemoteDB(remoteUrl);
   syncHandler = db.sync(remoteDB, { live: true, retry: true })
     .on('change', (info) => {
       console.log('[Sync]', info.direction, info.change.docs.length, 'docs');
