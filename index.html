@@ -23,13 +23,13 @@
       alert('JS Error: ' + e.reason);
     });
 
-    // Unregister ALL old service workers, clear ALL caches, then register fresh
+    // Disable service worker — it causes stale cache issues between devices
+    // The app works fine without it (just needs internet to load)
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(async regs => {
         for (const r of regs) await r.unregister();
         const keys = await caches.keys();
         for (const k of keys) await caches.delete(k);
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
       });
     }
   </script>
