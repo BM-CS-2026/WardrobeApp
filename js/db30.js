@@ -251,7 +251,7 @@ function makeRemoteDB(remoteUrl) {
           } else {
             opts.headers['Authorization'] = 'Basic ' + creds;
           }
-          return PouchDB.fetch(fetchUrl, opts);
+          return fetch(fetchUrl, opts);
         }
       });
     }
