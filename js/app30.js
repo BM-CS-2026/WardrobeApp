@@ -229,8 +229,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.log('[Sync] Pull complete:', syncResult.docs_written, 'docs written');
     } catch (e) {
       console.error('[Sync] Initial pull failed:', e);
-      document.getElementById('loading-msg').textContent = 'Sync failed - loading local data...';
-      await new Promise(r => setTimeout(r, 1500));
+      // Show error with details and retry option
+      hideLoading();
+      const errMsg = e.message || JSON.stringify(e);
+      openSheet(`
+        <h2>Sync Failed</h2>
+        <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px">Could not pull data from cloud:</p>
+        <div style="background:var(--bg);border-radius:8px;padding:10px;font-size:11px;font-family:monospace;margin-bottom:16px;word-break:break-all">${esc(errMsg)}</div>
+        <button class="btn btn-primary" onclick="closeSheet(); app.forceResync()">Retry Sync</button>
+        <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Skip (use local data)</button>
+      `);
+      // Still load local data and render
+      await loadData();
+      await ensureBuiltInPalettes();
+      setupTabs();
+      renderCurrentTab();
+      startSyncIfConfigured();
+      document.getElementById('file-picker-hidden').onchange = function() { app.handlePhotos(this); };
+      document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
+      return; // exit early, already set up
     }
     hideLoading();
   }
