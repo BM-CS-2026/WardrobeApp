@@ -23,14 +23,13 @@
       alert('JS Error: ' + e.reason);
     });
 
-    // Force update service worker — clear old caches, register fresh
+    // Unregister ALL old service workers, clear ALL caches, then register fresh
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => r.update());
-      });
-      navigator.serviceWorker.register('./sw.js?v=40').catch(() => {});
-      caches.keys().then(keys => {
-        keys.forEach(k => { if (!k.includes('v40')) caches.delete(k); });
+      navigator.serviceWorker.getRegistrations().then(async regs => {
+        for (const r of regs) await r.unregister();
+        const keys = await caches.keys();
+        for (const k of keys) await caches.delete(k);
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
       });
     }
   </script>
