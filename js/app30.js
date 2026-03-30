@@ -218,38 +218,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   if (migrated) console.log('[App] Migration from old DB complete');
 
-  // Sync first if configured (pull remote data before rendering)
+  // Sync — silent, don't block app loading
   const syncUrl = db.getSyncUrl();
   if (syncUrl) {
-    showLoading('Syncing data...');
-    try {
-      const syncResult = await db.pullOnce(syncUrl, (info) => {
-        document.getElementById('loading-msg').textContent = `Syncing... ${info.docs_written} docs`;
-      });
-      console.log('[Sync] Pull complete:', syncResult.docs_written, 'docs written');
-    } catch (e) {
-      console.error('[Sync] Initial pull failed:', e);
-      // Show error with details and retry option
-      hideLoading();
-      const errMsg = e.message || JSON.stringify(e);
-      openSheet(`
-        <h2>Sync Failed</h2>
-        <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px">Could not pull data from cloud:</p>
-        <div style="background:var(--bg);border-radius:8px;padding:10px;font-size:11px;font-family:monospace;margin-bottom:16px;word-break:break-all">${esc(errMsg)}</div>
-        <button class="btn btn-primary" onclick="closeSheet(); app.forceResync()">Retry Sync</button>
-        <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Skip (use local data)</button>
-      `);
-      // Still load local data and render
-      await loadData();
-      await ensureBuiltInPalettes();
-      setupTabs();
-      renderCurrentTab();
-      startSyncIfConfigured();
-      document.getElementById('file-picker-hidden').onchange = function() { app.handlePhotos(this); };
-      document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
-      return; // exit early, already set up
-    }
-    hideLoading();
+    // Try to pull in background, don't block or show errors
+    db.pullOnce(syncUrl).then(r => {
+      console.log('[Sync] Pull complete:', r.docs_written, 'docs');
+      if (r.docs_written > 0) { loadData().then(() => renderCurrentTab()); }
+    }).catch(e => {
+      console.warn('[Sync] Pull failed (will retry via live sync):', e.message || e);
+    });
   }
 
   // Auto-repair broken images (wrong field names, etc.)

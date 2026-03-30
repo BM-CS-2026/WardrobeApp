@@ -141,32 +141,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/pouchdb@7.3.1/dist/pouchdb.min.js"></script>
 
-  <!-- Pre-sync: pull data from Cloudant BEFORE app loads (PouchDB 7.x supports credentials in URL) -->
-  <script>
-  (async function() {
-    var syncUrl = (localStorage.getItem('sync_remote_url') || '').replace(/\s+/g, '');
-    if (!syncUrl) return;
-    var msg = document.getElementById('loading-msg');
-    var overlay = document.getElementById('loading-overlay');
-    if (overlay) overlay.classList.add('show');
-    if (msg) msg.textContent = 'Syncing data...';
-    try {
-      var remote = new PouchDB(syncUrl, { skip_setup: true });
-      var local = new PouchDB('wardrobe_sync');
-      var info = await local.info();
-      if (info.doc_count < 5) {
-        if (msg) msg.textContent = 'Downloading wardrobe...';
-        await local.replicate.from(remote, { batch_size: 50 });
-        if (msg) msg.textContent = 'Done!';
-      }
-    } catch(e) {
-      console.warn('[Pre-sync] failed:', e.message || e);
-      if (msg) msg.textContent = 'Loading...';
-    }
-    if (overlay) overlay.classList.remove('show');
-  })();
-  </script>
-
-  <script type="module" src="js/app30.js?v=41"></script>
+  <script type="module" src="js/app30.js?v=42"></script>
 </body>
 </html>
