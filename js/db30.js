@@ -242,33 +242,21 @@ function makeRemoteDB(remoteUrl) {
       parsed.username = '';
       parsed.password = '';
       const baseUrl = parsed.toString();
-      console.log('[Sync] makeRemoteDB:', baseUrl.substring(0, 40) + '...');
-
-      // Custom fetch with auth that works on Safari iOS
-      const customFetch = function(url, opts) {
-        opts = opts || {};
-        opts.credentials = 'omit';
-        // Always create fresh Headers to avoid Safari issues
-        const h = new Headers();
-        h.set('Authorization', 'Basic ' + creds);
-        h.set('Content-Type', 'application/json');
-        h.set('Accept', 'application/json');
-        // Merge any existing headers
-        if (opts.headers) {
-          const existing = opts.headers instanceof Headers ? opts.headers : new Headers(opts.headers);
-          existing.forEach((v, k) => { if (k.toLowerCase() !== 'authorization') h.set(k, v); });
-        }
-        opts.headers = h;
-        return window.fetch(url, opts);
-      };
-
       return new PouchDB(baseUrl, {
-        skip_setup: true,
-        fetch: customFetch
+        fetch: function(fetchUrl, opts) {
+          opts = opts || {};
+          if (!opts.headers) opts.headers = {};
+          if (opts.headers instanceof Headers) {
+            opts.headers.set('Authorization', 'Basic ' + creds);
+          } else {
+            opts.headers['Authorization'] = 'Basic ' + creds;
+          }
+          return PouchDB.fetch(fetchUrl, opts);
+        }
       });
     }
   } catch (e) {
-    console.error('[Sync] makeRemoteDB parse error:', e);
+    console.error('[Sync] makeRemoteDB error:', e);
   }
   return new PouchDB(cleanUrl);
 }
