@@ -139,9 +139,9 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pouchdb@7.3.1/dist/pouchdb.min.js"></script>
 
-  <!-- Pre-sync: pull data from Cloudant BEFORE app loads -->
+  <!-- Pre-sync: pull data from Cloudant BEFORE app loads (PouchDB 7.x supports credentials in URL) -->
   <script>
   (async function() {
     var syncUrl = (localStorage.getItem('sync_remote_url') || '').replace(/\s+/g, '');
@@ -151,23 +151,7 @@
     if (overlay) overlay.classList.add('show');
     if (msg) msg.textContent = 'Syncing data...';
     try {
-      var parsed = new URL(syncUrl);
-      var remote;
-      if (parsed.username) {
-        var creds = btoa(decodeURIComponent(parsed.username) + ':' + decodeURIComponent(parsed.password));
-        parsed.username = ''; parsed.password = '';
-        remote = new PouchDB(parsed.toString(), {
-          fetch: function(u, o) {
-            o = o || {};
-            if (!o.headers) o.headers = {};
-            if (o.headers instanceof Headers) o.headers.set('Authorization', 'Basic ' + creds);
-            else o.headers['Authorization'] = 'Basic ' + creds;
-            return fetch(u, o);
-          }
-        });
-      } else {
-        remote = new PouchDB(syncUrl);
-      }
+      var remote = new PouchDB(syncUrl, { skip_setup: true });
       var local = new PouchDB('wardrobe_sync');
       var info = await local.info();
       if (info.doc_count < 5) {

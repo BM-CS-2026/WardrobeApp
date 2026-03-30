@@ -233,32 +233,8 @@ export function setSyncUrl(url) {
 
 function makeRemoteDB(remoteUrl) {
   const cleanUrl = (remoteUrl || '').replace(/\s+/g, '');
-  try {
-    const parsed = new URL(cleanUrl);
-    if (parsed.username) {
-      const user = decodeURIComponent(parsed.username);
-      const pass = decodeURIComponent(parsed.password);
-      const creds = btoa(user + ':' + pass);
-      parsed.username = '';
-      parsed.password = '';
-      const baseUrl = parsed.toString();
-      return new PouchDB(baseUrl, {
-        fetch: function(fetchUrl, opts) {
-          opts = opts || {};
-          if (!opts.headers) opts.headers = {};
-          if (opts.headers instanceof Headers) {
-            opts.headers.set('Authorization', 'Basic ' + creds);
-          } else {
-            opts.headers['Authorization'] = 'Basic ' + creds;
-          }
-          return fetch(fetchUrl, opts);
-        }
-      });
-    }
-  } catch (e) {
-    console.error('[Sync] makeRemoteDB error:', e);
-  }
-  return new PouchDB(cleanUrl);
+  // PouchDB 7.x handles credentials in URLs natively
+  return new PouchDB(cleanUrl, { skip_setup: true });
 }
 
 export function pullOnce(remoteUrl, onProgress) {

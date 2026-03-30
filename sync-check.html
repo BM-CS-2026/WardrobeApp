@@ -38,7 +38,7 @@ input{width:100%;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;font-
 
 <div id="log"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pouchdb@7.3.1/dist/pouchdb.min.js"></script>
 <script>
 const localDB = new PouchDB('wardrobe_sync');
 
@@ -49,31 +49,9 @@ function getUrl() {
 }
 
 function makeRemote(rawUrl) {
-  const url = rawUrl.replace(/\s+/g, '');
-  try {
-    const p = new URL(url);
-    if (p.username) {
-      const user = decodeURIComponent(p.username);
-      const pass = decodeURIComponent(p.password);
-      const creds = btoa(user + ':' + pass);
-      p.username = ''; p.password = '';
-      const cleanUrl = p.toString();
-      log('  Auth URL: ' + cleanUrl.substring(0, 50) + '...');
-      return new PouchDB(cleanUrl, {
-        fetch: function(fetchUrl, opts) {
-          opts = opts || {};
-          if (!opts.headers) opts.headers = {};
-          if (opts.headers instanceof Headers) {
-            opts.headers.set('Authorization', 'Basic ' + creds);
-          } else {
-            opts.headers['Authorization'] = 'Basic ' + creds;
-          }
-          return fetch(fetchUrl, opts);
-        }
-      });
-    }
-  } catch(e) { log('  URL parse error: ' + e.message); }
-  return new PouchDB(url);
+  var url = rawUrl.replace(/\s+/g, '');
+  log('  Connecting to: ' + url.substring(0, 40) + '...');
+  return new PouchDB(url, { skip_setup: true });
 }
 
 async function check() {
