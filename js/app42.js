@@ -234,7 +234,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   const repaired = await db.repairImages();
   if (repaired) console.log(`[App] Repaired ${repaired} images`);
 
+  // DEBUG: check raw PouchDB directly
+  try {
+    const rawDB = new PouchDB('wardrobe_sync');
+    const rawInfo = await rawDB.info();
+    const rawItems = await rawDB.allDocs({startkey:'items:',endkey:'items:\ufff0'});
+    console.log('[DEBUG] Raw PouchDB:', rawInfo.doc_count, 'docs,', rawItems.rows.length, 'items');
+    if (rawItems.rows.length > 0 && items.length === 0) {
+      // db module can't read but raw PouchDB can — force reload from raw
+      document.title = 'DEBUG: ' + rawItems.rows.length + ' raw items found';
+    }
+  } catch(e) { console.error('[DEBUG]', e); }
+
   await loadData();
+
+  // DEBUG: if still 0 items, show what happened
+  if (items.length === 0) {
+    try {
+      const checkDB = new PouchDB('wardrobe_sync');
+      const checkItems = await checkDB.allDocs({startkey:'items:',endkey:'items:\ufff0',include_docs:true});
+      if (checkItems.rows.length > 0) {
+        // Data exists but loadData couldn't read it — load manually
+        items = checkItems.rows.map(r => {
+          const { _id, _rev, _attachments, type, ...rest } = r.doc;
+          return { ...rest, id: _id.substring(_id.indexOf(':') + 1) };
+        });
+      }
+    } catch(e) {}
+  }
+
   await ensureBuiltInPalettes();
   setupTabs();
   renderCurrentTab();
