@@ -93,7 +93,7 @@ export async function generateOutfitImage(itemDescriptions, apiKey) {
     return typeof d === 'object' ? d.name : d;
   }).join('; ');
 
-  const prompt = `Ultra-realistic professional fashion editorial photo. An athletic male model (mid-20s, clean-shaven) wearing EXACTLY these items — match each color and material precisely, do not substitute or change any item: ${itemList}. Full body standing pose, neutral light gray studio background. The clothing colors, textures, and styles must match the descriptions exactly. Studio lighting, sharp detail on fabric weave and texture. No text, no watermarks.`;
+  const prompt = `Ultra-realistic professional fashion editorial photo. A tall, lean and athletic man in his late 40s with dark brown wavy/slightly tousled hair, short salt-and-pepper stubble beard, olive/Mediterranean skin tone, angular face with defined jawline, wearing rectangular brown-frame glasses. He is wearing EXACTLY these items — match each color and material precisely, do not substitute or change any item: ${itemList}. Full body standing pose, neutral light gray studio background. The clothing colors, textures, and styles must match the descriptions exactly. Studio lighting, sharp detail on fabric weave and texture. No text, no watermarks.`;
 
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
