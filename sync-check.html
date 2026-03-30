@@ -38,7 +38,7 @@ input{width:100%;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;font-
 
 <div id="log"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/pouchdb@7.3.1/dist/pouchdb.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
 <script>
 const localDB = new PouchDB('wardrobe_sync');
 
@@ -50,7 +50,28 @@ function getUrl() {
 
 function makeRemote(rawUrl) {
   var url = rawUrl.replace(/\s+/g, '');
-  log('  Connecting to: ' + url.substring(0, 40) + '...');
+  try {
+    var parsed = new URL(url);
+    if (parsed.username) {
+      var user = decodeURIComponent(parsed.username);
+      var pass = decodeURIComponent(parsed.password);
+      var creds = btoa(user + ':' + pass);
+      parsed.username = ''; parsed.password = '';
+      var baseUrl = parsed.toString();
+      log('  Base URL: ' + baseUrl.substring(0, 50) + '...');
+      return new PouchDB(baseUrl, {
+        skip_setup: true,
+        ajax: { headers: { 'Authorization': 'Basic ' + creds }, withCredentials: false },
+        fetch: function(u, o) {
+          o = o || {};
+          o.headers = new Headers(o.headers || {});
+          o.headers.set('Authorization', 'Basic ' + creds);
+          o.credentials = 'omit';
+          return fetch(u, o);
+        }
+      });
+    }
+  } catch(e) { log('  URL parse error: ' + e.message); }
   return new PouchDB(url, { skip_setup: true });
 }
 

@@ -233,7 +233,31 @@ export function setSyncUrl(url) {
 
 function makeRemoteDB(remoteUrl) {
   const cleanUrl = (remoteUrl || '').replace(/\s+/g, '');
-  // PouchDB 7.x handles credentials in URLs natively
+  try {
+    const parsed = new URL(cleanUrl);
+    if (parsed.username) {
+      const user = decodeURIComponent(parsed.username);
+      const pass = decodeURIComponent(parsed.password);
+      parsed.username = '';
+      parsed.password = '';
+      const baseUrl = parsed.toString();
+      // Use XMLHttpRequest-based auth for Safari iOS compatibility
+      return new PouchDB(baseUrl, {
+        skip_setup: true,
+        ajax: {
+          headers: { 'Authorization': 'Basic ' + btoa(user + ':' + pass) },
+          withCredentials: false
+        },
+        fetch: function(url, opts) {
+          opts = opts || {};
+          opts.headers = new Headers(opts.headers || {});
+          opts.headers.set('Authorization', 'Basic ' + btoa(user + ':' + pass));
+          opts.credentials = 'omit';
+          return fetch(url, opts);
+        }
+      });
+    }
+  } catch(e) { console.error('[Sync] URL parse error:', e); }
   return new PouchDB(cleanUrl, { skip_setup: true });
 }
 
