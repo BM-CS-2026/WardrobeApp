@@ -232,8 +232,6 @@ export function setSyncUrl(url) {
 }
 
 function makeRemoteDB(remoteUrl) {
-  // PouchDB 8+ rejects URLs with embedded credentials
-  // Parse them out and pass via fetch headers
   const cleanUrl = (remoteUrl || '').replace(/\s+/g, '');
   try {
     const parsed = new URL(cleanUrl);
@@ -245,20 +243,28 @@ function makeRemoteDB(remoteUrl) {
       parsed.password = '';
       const baseUrl = parsed.toString();
       console.log('[Sync] makeRemoteDB:', baseUrl.substring(0, 40) + '...');
-      return new PouchDB(baseUrl, {
-        fetch: function(fetchUrl, fetchOpts) {
-          fetchOpts = fetchOpts || {};
-          // Ensure headers is a plain object for maximum compatibility
-          if (!fetchOpts.headers) {
-            fetchOpts.headers = {};
-          }
-          if (fetchOpts.headers instanceof Headers) {
-            fetchOpts.headers.set('Authorization', 'Basic ' + creds);
-          } else {
-            fetchOpts.headers['Authorization'] = 'Basic ' + creds;
-          }
-          return PouchDB.fetch(fetchUrl, fetchOpts);
+
+      // Custom fetch with auth that works on Safari iOS
+      const customFetch = function(url, opts) {
+        opts = opts || {};
+        opts.credentials = 'omit';
+        // Always create fresh Headers to avoid Safari issues
+        const h = new Headers();
+        h.set('Authorization', 'Basic ' + creds);
+        h.set('Content-Type', 'application/json');
+        h.set('Accept', 'application/json');
+        // Merge any existing headers
+        if (opts.headers) {
+          const existing = opts.headers instanceof Headers ? opts.headers : new Headers(opts.headers);
+          existing.forEach((v, k) => { if (k.toLowerCase() !== 'authorization') h.set(k, v); });
         }
+        opts.headers = h;
+        return window.fetch(url, opts);
+      };
+
+      return new PouchDB(baseUrl, {
+        skip_setup: true,
+        fetch: customFetch
       });
     }
   } catch (e) {
