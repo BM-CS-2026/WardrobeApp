@@ -109,30 +109,81 @@ function outfitImageCacheKey(itemIds) {
 
 const imageGenQueue = [];
 let isProcessingQueue = false;
+let aiGenTotal = 0;
+let aiGenDone = 0;
 
 function enqueueImageGeneration(outfitItems, cardElement, outfitObj = null) {
-  imageGenQueue.push({ outfitItems, cardElement, outfitObj });
+  const outfitId = outfitObj?.id || null;
+  imageGenQueue.push({ outfitItems, outfitId, cardElement, outfitObj });
+  aiGenTotal++;
+  updateAiProgressBar();
   processImageQueue();
+}
+
+function updateAiProgressBar() {
+  let bar = document.getElementById('ai-gen-progress');
+  if (aiGenDone >= aiGenTotal || aiGenTotal === 0) {
+    if (bar) bar.remove();
+    aiGenTotal = 0;
+    aiGenDone = 0;
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'ai-gen-progress';
+    bar.className = 'ai-gen-progress-bar';
+    document.body.appendChild(bar);
+  }
+  const pct = Math.round((aiGenDone / aiGenTotal) * 100);
+  bar.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="ai-shimmer" style="width:20px;height:20px;flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">Generating AI images: ${aiGenDone}/${aiGenTotal}</div>
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+          <div style="height:100%;background:var(--accent);border-radius:2px;width:${pct}%;transition:width 0.3s"></div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 async function processImageQueue() {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
   while (imageGenQueue.length > 0) {
-    const { outfitItems, cardElement, outfitObj } = imageGenQueue.shift();
-    if (!document.body.contains(cardElement)) continue;
-    await triggerOutfitImageGeneration(outfitItems, cardElement, outfitObj);
+    const job = imageGenQueue.shift();
+    await triggerOutfitImageGeneration(job);
+    aiGenDone++;
+    updateAiProgressBar();
   }
   isProcessingQueue = false;
 }
 
-async function triggerOutfitImageGeneration(outfitItems, cardElement, outfitObj) {
+// Find the current DOM card for an outfit (may have been re-rendered)
+function findCardForOutfit(outfitId, fallbackCard) {
+  if (outfitId) {
+    // Look for card with onclick containing this outfit ID
+    const allCards = document.querySelectorAll('.outfit-card-wide');
+    for (const card of allCards) {
+      const row = card.querySelector('.outfit-card-row');
+      if (row && row.getAttribute('onclick')?.includes(outfitId)) return card;
+    }
+  }
+  // Fall back to original card if still in DOM
+  if (fallbackCard && document.body.contains(fallbackCard)) return fallbackCard;
+  return null;
+}
+
+async function triggerOutfitImageGeneration({ outfitItems, outfitId, cardElement, outfitObj }) {
   const cacheKey = outfitImageCacheKey(outfitItems.map(i => i.id));
+  const MAX_RETRIES = 2;
 
   // Check cache first
   const cached = await db.loadImage(cacheKey);
   if (cached) {
-    replaceCollageWithAiImage(cardElement, cached);
+    const card = findCardForOutfit(outfitId, cardElement);
+    if (card) replaceCollageWithAiImage(card, cached);
     if (outfitObj && !outfitObj.aiImageId) {
       outfitObj.aiImageId = cacheKey;
       await db.putOutfit(outfitObj);
@@ -140,30 +191,55 @@ async function triggerOutfitImageGeneration(outfitItems, cardElement, outfitObj)
     return;
   }
 
-  // Show loading state
-  showCardLoadingState(cardElement);
+  // Show loading state on card (if visible)
+  let card = findCardForOutfit(outfitId, cardElement);
+  if (card) showCardLoadingState(card);
   console.log('[AI] Generating outfit image...', outfitItems.map(i => i.name));
 
-  try {
-    const apiKey = await db.getApiKey();
-    if (!apiKey) {
-      console.warn('[AI] No API key found, skipping image generation');
-      removeCardLoadingState(cardElement);
-      return;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const apiKey = await db.getApiKey();
+      if (!apiKey) {
+        console.warn('[AI] No API key found, skipping image generation');
+        card = findCardForOutfit(outfitId, cardElement);
+        if (card) removeCardLoadingState(card);
+        return;
+      }
+      const descriptions = outfitItems.map(i => ({ name: i.name, color: i.colorProfile?.dominantColor }));
+      const blob = await generateOutfitImage(descriptions, apiKey);
+      await db.saveImage(cacheKey, blob);
+
+      // Update card in DOM (find again since it may have been re-rendered)
+      card = findCardForOutfit(outfitId, cardElement);
+      if (card) replaceCollageWithAiImage(card, blob);
+
+      console.log('[AI] Outfit image generated successfully');
+      if (outfitObj && !outfitObj.aiImageId) {
+        outfitObj.aiImageId = cacheKey;
+        await db.putOutfit(outfitObj);
+      }
+      // Also update the in-memory outfit
+      if (outfitId) {
+        const memOutfit = outfits.find(o => o.id === outfitId);
+        if (memOutfit && !memOutfit.aiImageId) {
+          memOutfit.aiImageId = cacheKey;
+          await db.putOutfit(memOutfit);
+        }
+      }
+      return; // success
+    } catch (err) {
+      console.error(`[AI] DALL-E generation failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`, err.message);
+      if (attempt < MAX_RETRIES) {
+        // Wait before retry (3s, then 6s)
+        await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
+      } else {
+        card = findCardForOutfit(outfitId, cardElement);
+        if (card) {
+          removeCardLoadingState(card);
+          showCardErrorState(card, err.message);
+        }
+      }
     }
-    const descriptions = outfitItems.map(i => ({ name: i.name, color: i.colorProfile?.dominantColor }));
-    const blob = await generateOutfitImage(descriptions, apiKey);
-    await db.saveImage(cacheKey, blob);
-    replaceCollageWithAiImage(cardElement, blob);
-    console.log('[AI] Outfit image generated successfully');
-    if (outfitObj && !outfitObj.aiImageId) {
-      outfitObj.aiImageId = cacheKey;
-      await db.putOutfit(outfitObj);
-    }
-  } catch (err) {
-    console.error('[AI] DALL-E generation failed:', err.message);
-    removeCardLoadingState(cardElement);
-    showCardErrorState(cardElement, err.message);
   }
 }
 
@@ -184,6 +260,9 @@ function showCardLoadingState(cardElement) {
   const target = cardElement.querySelector('.outfit-card-ai') || cardElement.querySelector('.outfit-collage');
   if (!target) return;
   target.style.position = 'relative';
+  // Remove existing overlay if any
+  const existing = target.querySelector('.ai-loading-overlay');
+  if (existing) existing.remove();
   const overlay = document.createElement('div');
   overlay.className = 'ai-loading-overlay';
   overlay.innerHTML = '<div class="ai-shimmer"></div><div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Generating...</div>';
@@ -205,6 +284,36 @@ function showCardErrorState(cardElement, message) {
   overlay.innerHTML = `<div style="font-size:11px;color:#c00;text-align:center;padding:8px">AI failed<br>${message.slice(0, 60)}</div>`;
   collage.appendChild(overlay);
 }
+
+// Generate missing AI images for all outfits that don't have one
+app.generateMissingImages = () => {
+  const saved = outfits.filter(o => o.isSaved && !o.aiImageId);
+  if (!saved.length) {
+    openSheet(`
+      <h2>AI Images</h2>
+      <p style="color:var(--text-secondary);margin-bottom:16px">All outfits already have AI images!</p>
+      <button class="btn btn-secondary" onclick="closeSheet()">OK</button>
+    `);
+    return;
+  }
+
+  // Reset progress counters
+  aiGenTotal = 0;
+  aiGenDone = 0;
+
+  const allCards = document.querySelectorAll('.outfit-card-wide');
+  saved.forEach(outfit => {
+    const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
+    if (!oi.length) return;
+    // Find the card for this outfit
+    let card = null;
+    for (const c of allCards) {
+      const row = c.querySelector('.outfit-card-row');
+      if (row && row.getAttribute('onclick')?.includes(outfit.id)) { card = c; break; }
+    }
+    enqueueImageGeneration(oi, card, outfit);
+  });
+};
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded', async () => {
@@ -2489,10 +2598,13 @@ function renderOutfits() {
   const saved = outfits.filter(o => o.isSaved).sort((a, b) => b.dateCreated - a.dateCreated);
   const displayed = showFavoritesOnly ? saved.filter(o => o.favorite) : saved;
 
+  const missingCount = saved.filter(o => !o.aiImageId).length;
+
   view.innerHTML = `
     <div class="view-header">
       <h1>Outfits</h1>
       <div style="display:flex;gap:8px">
+        ${missingCount > 0 ? `<button class="btn-icon" onclick="app.generateMissingImages()" title="Generate missing AI images" style="font-size:14px;background:var(--accent);color:white;padding:4px 10px;border-radius:14px;white-space:nowrap">${missingCount} missing</button>` : ''}
         <button class="btn-icon" onclick="app.showWishlist()" title="Wish List" style="font-size:16px;${wishlist.length ? 'background:var(--warning);color:white' : ''}">💝</button>
         ${saved.some(o => o.favorite) ? `<button class="btn-icon" onclick="app.toggleFavFilter()" title="Favorites" style="font-size:16px;${showFavoritesOnly ? 'background:var(--accent);color:white' : ''}">❤️</button>` : ''}
       </div>
@@ -2510,6 +2622,11 @@ function renderOutfits() {
     `}
   `;
   lazyLoadImages();
+
+  // Auto-generate missing AI images (if not already processing)
+  if (missingCount > 0 && !isProcessingQueue) {
+    setTimeout(() => app.generateMissingImages(), 800);
+  }
 }
 
 app.toggleFavFilter = () => {
