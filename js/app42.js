@@ -13,7 +13,8 @@ let currentTab = 'wardrobe';
 let items = [];
 let palettes = [];
 let outfits = [];
-let wishlist = []; // Wish List items
+let wishlist = []; // Wish List items (outfit references)
+let myWishlist = []; // My Wish List (custom items with photo + text)
 
 // ── Undo System ──
 const undoStack = []; // { type, data }
@@ -273,6 +274,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Wire up persistent file inputs
   document.getElementById('file-picker-hidden').onchange = function() { app.handlePhotos(this); };
   document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
+  document.getElementById('wishlist-file-hidden').onchange = function() { app.handleMyWishPhoto(this); };
+  document.getElementById('wishlist-camera-hidden').onchange = function() { app.handleMyWishPhoto(this); };
 });
 
 // ── Sync ──
@@ -513,10 +516,15 @@ async function loadData() {
     db.getAllOutfits(),
   ]);
   wishlist = (await db.getSetting('wishlist')) || [];
+  myWishlist = (await db.getSetting('my_wishlist')) || [];
 }
 
 async function saveWishlist() {
   await db.putSetting('wishlist', wishlist);
+}
+
+async function saveMyWishlist() {
+  await db.putSetting('my_wishlist', myWishlist);
 }
 
 async function ensureBuiltInPalettes() {
@@ -3052,65 +3060,263 @@ app.confirmWishPick = async () => {
   app.showOutfitDetail(outfitId);
 };
 
+// ── My Wish List (custom items with photo + text) ──
+
+app.showAddMyWishItem = () => {
+  openSheet(`
+    <h2>Add to My Wish List</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Add an item you want to buy — snap a photo or describe it.</p>
+
+    <div id="mywish-photo-preview" style="margin-bottom:12px;display:none">
+      <img id="mywish-photo-img" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--radius);background:var(--bg)">
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <label class="btn btn-outline" style="flex:1;text-align:center;cursor:pointer;margin:0" for="wishlist-camera-hidden">
+        📷 Camera
+      </label>
+      <label class="btn btn-outline" style="flex:1;text-align:center;cursor:pointer;margin:0" for="wishlist-file-hidden">
+        🖼️ Photo
+      </label>
+    </div>
+
+    <textarea id="mywish-text" rows="3"
+      style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:16px"
+      placeholder="Describe the item (brand, color, where you saw it...)"></textarea>
+
+    <button class="btn btn-primary" onclick="app.saveMyWishItem()">Add to Wish List</button>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Cancel</button>
+  `);
+};
+
+app._myWishPhotoData = null;
+
+app.handleMyWishPhoto = (input) => {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    app._myWishPhotoData = e.target.result;
+    const preview = document.getElementById('mywish-photo-preview');
+    const img = document.getElementById('mywish-photo-img');
+    if (preview && img) {
+      img.src = e.target.result;
+      preview.style.display = 'block';
+    }
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+};
+
+app.saveMyWishItem = async () => {
+  const text = document.getElementById('mywish-text')?.value?.trim() || '';
+  const photoData = app._myWishPhotoData;
+
+  if (!text && !photoData) {
+    alert('Please add a photo or description.');
+    return;
+  }
+
+  let imageId = null;
+  if (photoData) {
+    imageId = generateId();
+    await db.saveImage(imageId, dataUrlToBlob(photoData));
+  }
+
+  myWishlist.push({
+    id: generateId(),
+    imageId,
+    text,
+    checked: false,
+    dateAdded: Date.now(),
+  });
+
+  app._myWishPhotoData = null;
+  await saveMyWishlist();
+  closeSheet();
+  app.showWishlist();
+};
+
+app.toggleMyWishItem = async (idx) => {
+  const item = myWishlist[idx];
+  if (!item) return;
+  item.checked = !item.checked;
+  await saveMyWishlist();
+  app.showWishlist();
+};
+
+app.removeMyWishItem = async (idx) => {
+  const item = myWishlist[idx];
+  if (item?.imageId) {
+    try { await db.deleteImage(item.imageId); } catch {}
+  }
+  myWishlist.splice(idx, 1);
+  await saveMyWishlist();
+  app.showWishlist();
+};
+
+app.editMyWishItem = (idx) => {
+  const item = myWishlist[idx];
+  if (!item) return;
+
+  openSheet(`
+    <h2>Edit Wish List Item</h2>
+
+    <div id="mywish-photo-preview" style="margin-bottom:12px;${item.imageId ? '' : 'display:none'}">
+      <img id="mywish-photo-img" ${item.imageId ? `data-image-id="${item.imageId}" class="lazy-img"` : ''} style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--radius);background:var(--bg)">
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <label class="btn btn-outline" style="flex:1;text-align:center;cursor:pointer;margin:0" for="wishlist-camera-hidden">
+        📷 Camera
+      </label>
+      <label class="btn btn-outline" style="flex:1;text-align:center;cursor:pointer;margin:0" for="wishlist-file-hidden">
+        🖼️ Photo
+      </label>
+    </div>
+
+    <textarea id="mywish-text" rows="3"
+      style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:16px"
+      placeholder="Describe the item...">${esc(item.text || '')}</textarea>
+
+    <button class="btn btn-primary" onclick="app.updateMyWishItem(${idx})">Save Changes</button>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet(); app.showWishlist()">Cancel</button>
+  `);
+  app._myWishPhotoData = null;
+  lazyLoadImages();
+};
+
+app.updateMyWishItem = async (idx) => {
+  const item = myWishlist[idx];
+  if (!item) return;
+
+  const text = document.getElementById('mywish-text')?.value?.trim() || '';
+  const photoData = app._myWishPhotoData;
+
+  if (!text && !photoData && !item.imageId) {
+    alert('Please add a photo or description.');
+    return;
+  }
+
+  if (photoData) {
+    // Delete old image if exists
+    if (item.imageId) {
+      try { await db.deleteImage(item.imageId); } catch {}
+    }
+    const imageId = generateId();
+    await db.saveImage(imageId, dataUrlToBlob(photoData));
+    item.imageId = imageId;
+  }
+
+  item.text = text;
+  app._myWishPhotoData = null;
+  await saveMyWishlist();
+  closeSheet();
+  app.showWishlist();
+};
+
+// ── Show Wishlist (both sections) ──
+
 app.showWishlist = () => {
-  if (!wishlist.length) {
+  const hasMyItems = myWishlist.length > 0;
+  const hasOutfitRefs = wishlist.length > 0;
+
+  if (!hasMyItems && !hasOutfitRefs) {
     openSheet(`
       <h2>Wish List</h2>
       <div class="empty-state" style="padding:32px">
         <div class="icon">🛒</div>
         <h3>Nothing Yet</h3>
-        <p>Tap "Wish List" on any outfit to save it here with shopping links.</p>
+        <p>Add items you want to buy, or tap "Wish List" on any outfit to save references.</p>
       </div>
+      <button class="btn btn-primary" style="margin-bottom:8px" onclick="app.showAddMyWishItem()">+ Add Item</button>
       <button class="btn btn-secondary" onclick="closeSheet()">Close</button>
     `);
     return;
   }
 
-  openSheet(`
-    <h2>Wish List</h2>
-    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">${wishlist.length} outfit${wishlist.length !== 1 ? 's' : ''} saved for shopping</p>
-    <div class="outfit-list">
-      ${wishlist.map((w, wi) => {
-        const checkedItems = w.checkedItems || [];
-        return `
-          <div class="outfit-card-wide" style="margin-bottom:20px">
-            <div style="padding:10px 12px;font-weight:700;font-size:14px;border-bottom:1px solid var(--border)">Outfit ${wi + 1}</div>
-            ${w.aiImageId ? `<img data-ai-image-id="${w.aiImageId}" class="lazy-ai-img" style="width:100%;max-height:250px;object-fit:contain;background:var(--bg)">` : ''}
-            <div style="padding:10px 12px">
-              ${w.items.map((item, ii) => {
-                const cat = CATEGORIES.find(c => c.id === item.category);
-                const searchQuery = encodeURIComponent(item.name);
-                const isChecked = checkedItems.includes(ii);
-                return `
-                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                    <div class="wishlist-check ${isChecked ? 'checked' : ''}" onclick="app.toggleWishlistItem(${wi}, ${ii})" style="cursor:pointer;flex-shrink:0">
-                      ${isChecked ? '☑' : '☐'}
-                    </div>
-                    <span style="font-size:16px;flex-shrink:0">${cat?.icon || '👔'}</span>
-                    <span style="flex:1;font-size:13px;${isChecked ? 'font-weight:600' : ''}">${esc(item.name)}</span>
-                    <a href="https://www.asos.com/search/?q=${searchQuery}" target="_blank" rel="noopener"
-                       style="font-size:12px;color:var(--accent);text-decoration:none;padding:4px 10px;border:1px solid var(--accent);border-radius:14px;white-space:nowrap;flex-shrink:0"
-                       onclick="event.stopPropagation()">
-                      ASOS ›
-                    </a>
-                  </div>
-                `;
-              }).join('')}
-
-              <div style="margin-top:12px">
-                <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">My notes & links</label>
-                <textarea id="wishlist-notes-${wi}" rows="3"
-                  style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;resize:vertical"
-                  placeholder="Paste links you found, add notes..."
-                  onblur="app.saveWishlistNotes(${wi}, this.value)">${esc(w.notes || '')}</textarea>
+  // ── My Wish List section ──
+  const myWishHtml = `
+    <div style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <h2 style="margin:0">My Wish List</h2>
+        <button class="btn btn-sm btn-primary" onclick="app.showAddMyWishItem()" style="margin:0;padding:6px 14px">+ Add</button>
+      </div>
+      ${hasMyItems ? `
+        <div class="my-wishlist-items">
+          ${myWishlist.map((item, idx) => `
+            <div class="mywish-card" style="display:flex;gap:12px;padding:12px;background:var(--card);border-radius:var(--radius);border:1.5px solid var(--border);margin-bottom:10px;${item.checked ? 'opacity:0.5' : ''}">
+              <div class="wishlist-check ${item.checked ? 'checked' : ''}" onclick="app.toggleMyWishItem(${idx})" style="cursor:pointer;flex-shrink:0;margin-top:2px">
+                ${item.checked ? '☑' : '☐'}
               </div>
-
-              <button class="btn btn-sm btn-danger" style="margin-top:10px" onclick="app.removeFromWishlist(${wi})">Remove</button>
+              ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:70px;height:70px;border-radius:8px;object-fit:cover;flex-shrink:0;cursor:pointer" onclick="app.editMyWishItem(${idx})">` : ''}
+              <div style="flex:1;min-width:0;cursor:pointer" onclick="app.editMyWishItem(${idx})">
+                <div style="font-size:14px;${item.checked ? 'text-decoration:line-through;' : ''}white-space:pre-wrap;word-break:break-word">${esc(item.text || 'No description')}</div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">${new Date(item.dateAdded).toLocaleDateString()}</div>
+              </div>
+              <button onclick="app.removeMyWishItem(${idx})" style="background:none;border:none;color:var(--danger);font-size:18px;cursor:pointer;flex-shrink:0;padding:0 4px" title="Remove">✕</button>
             </div>
-          </div>
-        `;
-      }).join('')}
+          `).join('')}
+        </div>
+      ` : `
+        <p style="font-size:13px;color:var(--text-secondary);text-align:center;padding:16px 0">No items yet. Tap "+ Add" to get started.</p>
+      `}
     </div>
+  `;
+
+  // ── Outfit References section ──
+  const outfitRefHtml = hasOutfitRefs ? `
+    <div style="border-top:2px solid var(--border);padding-top:16px">
+      <h3 style="font-size:15px;color:var(--text-secondary);margin-bottom:12px">Outfit References</h3>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${wishlist.length} outfit${wishlist.length !== 1 ? 's' : ''} saved for reference</p>
+      <div class="outfit-list">
+        ${wishlist.map((w, wi) => {
+          const checkedItems = w.checkedItems || [];
+          return `
+            <div class="outfit-card-wide" style="margin-bottom:20px">
+              <div style="padding:10px 12px;font-weight:700;font-size:14px;border-bottom:1px solid var(--border)">Outfit ${wi + 1}</div>
+              ${w.aiImageId ? `<img data-ai-image-id="${w.aiImageId}" class="lazy-ai-img" style="width:100%;max-height:250px;object-fit:contain;background:var(--bg)">` : ''}
+              <div style="padding:10px 12px">
+                ${w.items.map((item, ii) => {
+                  const cat = CATEGORIES.find(c => c.id === item.category);
+                  const searchQuery = encodeURIComponent(item.name);
+                  const isChecked = checkedItems.includes(ii);
+                  return `
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                      <div class="wishlist-check ${isChecked ? 'checked' : ''}" onclick="app.toggleWishlistItem(${wi}, ${ii})" style="cursor:pointer;flex-shrink:0">
+                        ${isChecked ? '☑' : '☐'}
+                      </div>
+                      <span style="font-size:16px;flex-shrink:0">${cat?.icon || '👔'}</span>
+                      <span style="flex:1;font-size:13px;${isChecked ? 'font-weight:600' : ''}">${esc(item.name)}</span>
+                      <a href="https://www.asos.com/search/?q=${searchQuery}" target="_blank" rel="noopener"
+                         style="font-size:12px;color:var(--accent);text-decoration:none;padding:4px 10px;border:1px solid var(--accent);border-radius:14px;white-space:nowrap;flex-shrink:0"
+                         onclick="event.stopPropagation()">
+                        ASOS ›
+                      </a>
+                    </div>
+                  `;
+                }).join('')}
+
+                <div style="margin-top:12px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">My notes & links</label>
+                  <textarea id="wishlist-notes-${wi}" rows="3"
+                    style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;resize:vertical"
+                    placeholder="Paste links you found, add notes..."
+                    onblur="app.saveWishlistNotes(${wi}, this.value)">${esc(w.notes || '')}</textarea>
+                </div>
+
+                <button class="btn btn-sm btn-danger" style="margin-top:10px" onclick="app.removeFromWishlist(${wi})">Remove</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  openSheet(`
+    ${myWishHtml}
+    ${outfitRefHtml}
     <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet()">Close</button>
   `);
   lazyLoadImages();
