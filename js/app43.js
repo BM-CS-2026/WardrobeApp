@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44n';
+window.APP_VERSION = '44p';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -566,16 +566,50 @@ function tsLog(msg) {
 app.forcePushToCloud = async () => {
   const url = db.getSyncUrl();
   if (!url) { alert('No sync URL configured.'); return; }
-  tsLog('Pushing to cloud...');
+  closeSheet();
+  showLoading('Resizing oversized images...');
+  // Auto-resize before push
+  const localDB = new PouchDB('wardrobe_sync');
+  const allImgs = await localDB.allDocs({startkey:'images:', endkey:'images:\ufff0', include_docs:true});
+  let resized = 0;
+  const oversized = allImgs.rows.filter(r => r.doc.dataUrl && r.doc.dataUrl.length > 500000);
+  for (let i = 0; i < oversized.length; i++) {
+    document.getElementById('loading-msg').textContent = `Resizing ${i + 1}/${oversized.length} large images...`;
+    try {
+      const doc = oversized[i].doc;
+      const newUrl = await _resizeImageForSync(doc.dataUrl);
+      if (newUrl.length < doc.dataUrl.length) { doc.dataUrl = newUrl; await localDB.put(doc); resized++; }
+    } catch {}
+  }
+  document.getElementById('loading-msg').textContent = `Pushing to cloud...`;
   try {
     const result = await db.pushOnce(url);
-    tsLog('PUSH COMPLETE: ' + result.docs_written + ' docs written');
-    alert('Push complete! ' + result.docs_written + ' docs uploaded.');
+    hideLoading();
+    alert(`Push complete!\n${resized > 0 ? 'Resized ' + resized + ' images first.\n' : ''}${result.docs_written} docs uploaded.`);
   } catch (e) {
-    tsLog('PUSH ERROR: ' + e.message);
+    hideLoading();
     alert('Push failed: ' + e.message);
   }
 };
+
+// Resize image dataUrl to max 800px, JPEG quality 0.65 — for Cloudant 1MB limit
+function _resizeImageForSync(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 800, Q = 0.65;
+      let w = img.width, h = img.height;
+      if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
+      else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL('image/jpeg', Q));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
 
 app.wipeRemoteAndPush = async () => {
   const url = db.getSyncUrl();
@@ -617,8 +651,25 @@ app.wipeRemoteAndPush = async () => {
       }
     }
 
-    // Step 2: Push local data one doc at a time with progress + auto-retry
+    // Step 2: Auto-resize oversized images before pushing
     const localDB = new PouchDB('wardrobe_sync');
+    const allImgs = await localDB.allDocs({startkey:'images:', endkey:'images:\ufff0', include_docs:true});
+    let resizeCount = 0;
+    const oversized = allImgs.rows.filter(r => r.doc.dataUrl && r.doc.dataUrl.length > 500000);
+    for (let ri = 0; ri < oversized.length; ri++) {
+      const doc = oversized[ri].doc;
+      document.getElementById('loading-msg').textContent = `Resizing large images... ${ri + 1}/${oversized.length}`;
+      try {
+        const newUrl = await _resizeImageForSync(doc.dataUrl);
+        if (newUrl.length < doc.dataUrl.length) {
+          doc.dataUrl = newUrl;
+          await localDB.put(doc);
+          resizeCount++;
+        }
+      } catch {}
+    }
+
+    // Step 3: Push docs in small batches with progress
     const localDocs = await localDB.allDocs();
     const totalDocs = localDocs.rows.length;
     let pushed = 0, pushErrors = 0;
@@ -636,7 +687,6 @@ app.wipeRemoteAndPush = async () => {
           if (attempt < 2) {
             await new Promise(r => setTimeout(r, 2000));
           } else {
-            // Try one by one
             for (const docId of batch) {
               try {
                 await localDB.replicate.to(remote, { doc_ids: [docId] });
@@ -650,7 +700,7 @@ app.wipeRemoteAndPush = async () => {
     }
 
     hideLoading();
-    alert(`Done!\n\nDeleted ${deleted} remote docs.\nPushed ${pushed}/${totalDocs} docs to cloud.\n${pushErrors > 0 ? pushErrors + ' failed (probably too large).' : 'No errors!'}\n\nCloud is now synced with this device.`);
+    alert(`Done!\n\n${resizeCount > 0 ? 'Resized ' + resizeCount + ' oversized images.\n' : ''}Deleted ${deleted} remote docs.\nPushed ${pushed}/${totalDocs} docs to cloud.\n${pushErrors > 0 ? pushErrors + ' failed.' : 'No errors!'}\n\nCloud is now synced with this device.`);
   } catch (e) {
     hideLoading();
     alert('Error: ' + (e.message || JSON.stringify(e)));
