@@ -168,7 +168,41 @@ body {
   padding: 12px 16px;
 }
 
-/* Horizontal scroll row for wardrobe sections */
+/* Grid layout for wardrobe sections */
+.item-grid-wrap {
+  padding: 4px 16px 8px;
+}
+
+.item-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.item-grid.collapsed {
+  max-height: calc(3 * (var(--grid-item-h, 140px) + 8px));
+  overflow: hidden;
+}
+
+.item-grid .item-card {
+  width: auto;
+}
+
+.item-grid .item-card .thumb {
+  height: 100px;
+  aspect-ratio: auto;
+}
+
+.item-grid .item-card .info .name {
+  font-size: 11px;
+}
+
+.grid-expand-btn {
+  margin-top: 8px;
+  width: 100%;
+}
+
+/* Legacy horizontal scroll (kept for other views) */
 .item-scroll-row {
   display: flex;
   gap: 10px;

@@ -710,8 +710,11 @@ function renderWardrobe() {
           ${section.items.length === 0 ? `
             <div class="category-empty">No ${plural(section.name).toLowerCase()} yet</div>
           ` : `
-            <div class="item-scroll-row">
-              ${section.items.map(item => renderItemCard(item)).join('')}
+            <div class="item-grid-wrap" id="grid-${section.id}">
+              <div class="item-grid collapsed">
+                ${section.items.map(item => renderItemCard(item)).join('')}
+              </div>
+              ${section.items.length > 9 ? `<button class="btn btn-sm btn-outline grid-expand-btn" onclick="app.toggleGridExpand('${section.id}', ${section.items.length})">Show all ${section.items.length}</button>` : ''}
             </div>
           `}
         </div>
@@ -743,6 +746,17 @@ function renderItemCard(item) {
     </div>
   `;
 }
+
+app.toggleGridExpand = (catId, total) => {
+  const wrap = document.getElementById(`grid-${catId}`);
+  if (!wrap) return;
+  const grid = wrap.querySelector('.item-grid');
+  const btn = wrap.querySelector('.grid-expand-btn');
+  if (!grid) return;
+  const isCollapsed = grid.classList.contains('collapsed');
+  grid.classList.toggle('collapsed');
+  if (btn) btn.textContent = isCollapsed ? `Show less` : `Show all ${total}`;
+};
 
 // ── Add Flow ──
 
