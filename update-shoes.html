@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head><title>Update Shoe Descriptions</title></head>
+<body>
+<h2>Update Shoe Descriptions</h2>
+<p>This will update all shoe item descriptions in your local PouchDB to match the detailed prompts.</p>
+<button id="run" onclick="runUpdate()" style="padding:12px 24px;font-size:16px">Run Update</button>
+<pre id="log" style="margin-top:16px;white-space:pre-wrap"></pre>
+
+<script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+<script>
+const SHOE_PROMPTS = {
+  "beige cream canvas low-top": "Beige cream canvas low-top sneakers, Converse Chuck Taylor style, with thick black laces, white rubber toe cap, black rubber sole stripe, worn-in matte canvas texture, flat vulcanized white rubber sole",
+  "white leather high-top": "All-white leather high-top sneakers, clean minimalist design, smooth full-grain leather upper, white laces, white rubber cupsole, rounded toe, padded collar, no visible branding",
+  "brown perforated leather derby": "Medium brown leather derby shoes with perforated micro-dot texture on toe cap and sides, plain smooth leather on quarters, flat thin brown laces, slightly rounded toe, thin stacked leather sole",
+  "dark brown chelsea": "Dark chocolate brown smooth leather Chelsea boots, elastic side panels, pull tabs at front and back, rounded toe, stacked leather sole with slight heel, ankle-height, minimal stitching",
+  "navy blue suede high-top": "Dark navy blue suede high-top sneakers, lace-up with matching navy laces, clean white rubber cupsole, padded collar, smooth suede texture throughout, minimalist design",
+  "black leather chelsea": "Black polished smooth leather Chelsea boots, elastic side panels, pull tabs front and back, rounded almond toe, stacked black leather sole with slight heel, clean glossy finish, ankle height",
+  "gray suede penny loafer": "Medium gray suede penny loafers, classic penny strap across vamp, moccasin-style stitching, slightly rounded toe, tan leather lining, dark rubber sole, matte suede texture",
+  "dark gray mesh": "Dark charcoal gray athletic sneakers with suede and breathable mesh panels, matching gray laces, white midsole stripe accent, black rubber outsole, low-profile running shoe silhouette",
+  "black pebbled leather slip": "Black pebbled grain leather slip-on loafers, wide rounded toe, elasticated gusset under tongue, padded collar, thick black rubber sole, textured pebble leather finish",
+  "black leather horsebit": "Black smooth polished leather horsebit loafers, silver-tone metal horse-bit hardware across vamp, squared almond toe, leather sole, clean glossy black finish",
+  "black leather cap-toe oxford": "Black smooth leather cap-toe oxford shoes, closed lacing system, thin black flat laces, straight toe cap seam, slightly squared toe, thin stacked leather sole, formal dress shoe",
+  "dark navy leather tassel": "Dark navy-black leather tassel loafers, twin leather tassels on vamp, moccasin-style stitching at toe, slightly rounded toe, leather sole, rich dark patina finish",
+  "dark brown leather casual": "Dark espresso brown leather casual derby shoes, smooth matte leather with subtle panel stitching, brown laces, rounded toe, thick black rubber sole, slightly chunky comfort silhouette",
+  "dark brown double monk": "Dark chocolate brown polished leather double monk strap shoes, two brass/antique buckle straps across vamp, cap toe seam, slightly squared toe, thin leather sole, burnished glossy finish",
+  "taupe suede monk strap": "Taupe khaki suede monk strap shoes with single buckle closure, wide rounded toe, moccasin-style stitching detail, crepe or rubber sole, matte brushed suede texture",
+  "light gray suede driving": "Light gray suede driving moccasins, slip-on style, hand-stitched moccasin seam on vamp, slightly squared toe, thin flexible rubber sole with nub pattern on heel, soft brushed suede",
+  "tan cognac leather penny": "Tan cognac smooth leather penny loafers, classic penny strap across vamp, slightly rounded toe, natural leather color with visible grain, leather sole, clean traditional preppy style",
+  "dark navy suede driving": "Dark navy blue suede driving moccasins, slip-on with hand-stitched moccasin toe seam, matching strap detail across vamp, flexible rubber sole, deep navy matte suede",
+  "tan woven leather huarache": "Tan taupe woven leather huarache-style loafers, interlaced hand-woven leather strips on vamp and sides, slightly squared toe, leather sole, natural brown tone, breathable summer slip-on",
+  "dark navy suede penny": "Dark navy blue suede penny loafers, classic penny strap across vamp, rounded toe, matte brushed suede texture, dark rubber sole, clean traditional design",
+  "burgundy olive retro": "Retro-style low-top sneakers with burgundy wine suede, olive green leather panels, and navy blue accents, white laces, off-white cream rubber sole, color-blocked vintage design",
+  "black suede nike": "Black suede and canvas low-top sneakers, white swoosh-like side stripe logo, black laces, off-white rubber sole, slightly worn vintage aesthetic, black suede upper with canvas panels",
+};
+
+async function runUpdate() {
+  const log = document.getElementById('log');
+  const db = new PouchDB('wardrobe_sync');
+
+  const result = await db.allDocs({startkey:'items:',endkey:'items:\ufff0', include_docs:true});
+  const shoes = result.rows.filter(r => r.doc.category === 'shoes');
+
+  log.textContent = `Found ${shoes.length} shoe items.\n\n`;
+
+  let updated = 0;
+  for (const row of shoes) {
+    const doc = row.doc;
+    const currentName = (doc.name || '').toLowerCase();
+
+    // Find best matching prompt
+    let bestMatch = null;
+    let bestScore = 0;
+    for (const [key, prompt] of Object.entries(SHOE_PROMPTS)) {
+      const words = key.split(' ');
+      const score = words.filter(w => currentName.includes(w)).length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = prompt;
+      }
+    }
+
+    if (bestMatch && bestScore >= 2) {
+      log.textContent += `✓ "${doc.name}" → "${bestMatch.substring(0, 60)}..."\n`;
+      doc.name = bestMatch;
+      await db.put(doc);
+      updated++;
+    } else {
+      log.textContent += `? No match for "${doc.name}" (best score: ${bestScore})\n`;
+    }
+  }
+
+  log.textContent += `\nDone! Updated ${updated} of ${shoes.length} shoes.\n`;
+  log.textContent += `Reload the app to see changes.`;
+}
+</script>
+</body>
+</html>

@@ -63,8 +63,8 @@ export async function extractFromRegion(imageSource, box, category = null) {
 
   // Add padding around the bounding box — shoes and belts need more padding to avoid cutting
   const needsExtraPad = category === 'shoes' || category === 'belt';
-  const padX = needsExtraPad ? 0.05 : 0.02;
-  const padY = needsExtraPad ? 0.08 : 0.02;
+  const padX = needsExtraPad ? 0.12 : 0.02;
+  const padY = needsExtraPad ? 0.15 : 0.02;
   const bx = Math.max(0, box.x - padX);
   const by = Math.max(0, box.y - padY);
   const bw = Math.min(1 - bx, box.width + padX * 2);
