@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44h';
+window.APP_VERSION = '44i';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -741,7 +741,7 @@ function renderItemCard(item) {
   const isSelected = selectedItems.has(item.id);
   const onclick = selectMode ? `app.toggleItemSelection('${item.id}')` : `app.showItemDetail('${item.id}')`;
   return `
-    <div class="item-card ${isSelected ? 'item-selected' : ''}" onclick="${onclick}">
+    <div class="item-card ${isSelected ? 'item-selected' : ''}" data-cat="${item.category}" onclick="${onclick}">
       <div class="thumb" id="thumb-${item.id}">
         ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img">` : `<span>${CATEGORIES.find(c => c.id === item.category)?.icon || '👔'}</span>`}
         ${selectMode ? `<div class="select-check ${isSelected ? 'checked' : ''}">

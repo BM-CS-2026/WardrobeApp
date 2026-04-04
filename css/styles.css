@@ -461,6 +461,10 @@ body {
   object-fit: cover;
 }
 
+.item-card[data-cat="belt"] .thumb img {
+  object-fit: contain;
+}
+
 .item-card .info {
   padding: 8px 10px;
 }
