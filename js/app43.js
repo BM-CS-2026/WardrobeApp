@@ -430,6 +430,9 @@ app.showSyncSettings = () => {
         <span>Items</span><strong>${itemCount}</strong>
       </div>
       <div style="font-size:13px;display:flex;justify-content:space-between;margin-bottom:4px">
+        <span>App Version</span><strong>${window.APP_VERSION || 'unknown'}</strong>
+      </div>
+      <div style="font-size:13px;display:flex;justify-content:space-between;margin-bottom:4px">
         <span>Outfits</span><strong>${outfitCount}</strong>
       </div>
       <div style="font-size:13px;display:flex;justify-content:space-between">
