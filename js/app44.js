@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44j';
+window.APP_VERSION = '44k';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -471,6 +471,10 @@ app.showSyncSettings = () => {
         ☁️ Force Push (upload all data to cloud)
       </button>
 
+      <button class="btn btn-sm btn-danger" style="margin-bottom:6px" onclick="app.wipeRemoteAndPush()">
+        🔥 Wipe Remote & Push (replace cloud with local)
+      </button>
+
       <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.checkRemoteDb()">
         📡 Check Remote Database
       </button>
@@ -570,6 +574,50 @@ app.forcePushToCloud = async () => {
   } catch (e) {
     tsLog('PUSH ERROR: ' + e.message);
     alert('Push failed: ' + e.message);
+  }
+};
+
+app.wipeRemoteAndPush = async () => {
+  const url = db.getSyncUrl();
+  if (!url) { alert('No sync URL configured.'); return; }
+
+  const localItems = items.length;
+  const localOutfits = outfits.filter(o => o.isSaved).length;
+
+  if (!confirm(`This will:\n\n1. DELETE everything in the cloud database\n2. Upload your local data (${localItems} items, ${localOutfits} outfits)\n\nThe cloud will be an exact copy of this device.\n\nContinue?`)) return;
+
+  closeSheet();
+  showLoading('Wiping remote database...');
+
+  try {
+    // Step 1: Destroy the remote database and recreate it
+    const remote = new PouchDB(url, { skip_setup: true });
+    const allDocs = await remote.allDocs();
+    const toDelete = allDocs.rows.map(row => ({
+      _id: row.id,
+      _rev: row.value.rev,
+      _deleted: true,
+    }));
+
+    if (toDelete.length > 0) {
+      document.getElementById('loading-msg').textContent = `Deleting ${toDelete.length} remote docs...`;
+      // Delete in batches of 100
+      for (let i = 0; i < toDelete.length; i += 100) {
+        const batch = toDelete.slice(i, i + 100);
+        await remote.bulkDocs(batch);
+        document.getElementById('loading-msg').textContent = `Deleting... ${Math.min(i + 100, toDelete.length)}/${toDelete.length}`;
+      }
+    }
+
+    // Step 2: Push local data to the now-empty remote
+    document.getElementById('loading-msg').textContent = 'Pushing local data to cloud...';
+    const result = await db.pushOnce(url);
+
+    hideLoading();
+    alert(`Done!\n\nDeleted ${toDelete.length} old remote docs.\nPushed ${result.docs_written} docs from local.\n\nCloud is now an exact copy of this device.`);
+  } catch (e) {
+    hideLoading();
+    alert('Error: ' + (e.message || JSON.stringify(e)));
   }
 };
 
