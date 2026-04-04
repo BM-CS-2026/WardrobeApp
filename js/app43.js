@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44e';
+window.APP_VERSION = '44f';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -1919,6 +1919,8 @@ let outfitSeedItem = null;
 let outfitVibe = null;
 let outfitWeather = null;
 let outfitNoJeans = false;
+  outfitNoBlazer = false;
+let outfitNoBlazer = false;
 
 app._seedSelections = new Set();
 app._outfitGuidance = '';
@@ -1930,6 +1932,8 @@ app.startCreateOutfit = () => {
   outfitVibe = null;
   outfitWeather = null;
   outfitNoJeans = false;
+  outfitNoBlazer = false;
+  outfitNoBlazer = false;
   showOutfitStep1();
 };
 
@@ -2145,8 +2149,14 @@ function showOutfitStep2() {
     </div>
 
     <div style="display:flex;align-items:center;gap:10px;margin-top:16px;padding:10px 12px;background:var(--bg);border-radius:var(--radius-sm)">
-      <label style="flex:1;font-size:14px;font-weight:600;cursor:pointer" for="no-jeans-toggle">No jeans</label>
+      <label style="flex:1;font-size:14px;font-weight:600;cursor:pointer">No jeans</label>
       <div class="toggle-switch ${outfitNoJeans ? 'on' : ''}" onclick="app.toggleNoJeans()">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;padding:10px 12px;background:var(--bg);border-radius:var(--radius-sm)">
+      <label style="flex:1;font-size:14px;font-weight:600;cursor:pointer">No blazer / jacket</label>
+      <div class="toggle-switch ${outfitNoBlazer ? 'on' : ''}" onclick="app.toggleNoBlazer()">
         <div class="toggle-knob"></div>
       </div>
     </div>
@@ -2183,8 +2193,14 @@ app.selectWeather = (weatherId) => {
 
 app.toggleNoJeans = () => {
   outfitNoJeans = !outfitNoJeans;
-  const toggle = document.querySelector('.toggle-switch');
-  if (toggle) toggle.classList.toggle('on', outfitNoJeans);
+  const toggles = document.querySelectorAll('.toggle-switch');
+  if (toggles[0]) toggles[0].classList.toggle('on', outfitNoJeans);
+};
+
+app.toggleNoBlazer = () => {
+  outfitNoBlazer = !outfitNoBlazer;
+  const toggles = document.querySelectorAll('.toggle-switch');
+  if (toggles[1]) toggles[1].classList.toggle('on', outfitNoBlazer);
 };
 
 app.runVibeOutfitGen = () => {
@@ -2212,6 +2228,13 @@ app.runVibeOutfitGen = () => {
       filteredItems = filteredItems.filter(item => {
         const name = item.name.toLowerCase();
         return !name.includes('jeans') && !name.includes('denim');
+      });
+    }
+
+    // No blazer/jacket toggle
+    if (outfitNoBlazer) {
+      filteredItems = filteredItems.filter(item => {
+        return item.category !== 'jacket';
       });
     }
 
@@ -2375,6 +2398,7 @@ app.generateFromTwoItems = (id1, id2) => {
   outfitVibe = null;
   outfitWeather = null;
   outfitNoJeans = false;
+  outfitNoBlazer = false;
   showOutfitStep2();
 };
 
@@ -4080,6 +4104,7 @@ app.generateFromItem = (itemId) => {
   outfitVibe = null;
   outfitWeather = null;
   outfitNoJeans = false;
+  outfitNoBlazer = false;
   showOutfitStep2();
 };
 

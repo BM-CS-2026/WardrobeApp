@@ -1,7 +1,7 @@
 import { colorScore, paletteAffinity } from './color-engine.js';
 import { CATEGORIES } from './utils.js';
 
-const MAX_RESULTS = 8;
+const MAX_RESULTS = 4;
 const TOP_PER_CATEGORY = 5;
 
 // seedItem can be a single item OR an array of items
@@ -78,7 +78,7 @@ export function generateOutfits(allItems, palette, seedItem = null) {
 
   candidates.sort((a, b) => b.overallScore - a.overallScore);
 
-  // Enforce diversity: pick top results that differ by at least 2 items
+  // Enforce diversity: each outfit must differ by at least 2 items from all others
   const diverse = [];
   for (const c of candidates) {
     if (diverse.length >= MAX_RESULTS) break;
@@ -87,8 +87,10 @@ export function generateOutfits(allItems, palette, seedItem = null) {
       const dIds = new Set(d.items.map(i => i.id));
       let shared = 0;
       for (const id of cIds) { if (dIds.has(id)) shared++; }
-      // If they share all but 0 or 1 items, skip (too similar)
-      return shared >= Math.max(cIds.size, dIds.size) - 1;
+      const totalUnique = new Set([...cIds, ...dIds]).size;
+      const diffCount = totalUnique - shared;
+      // Must have at least 2 different items
+      return diffCount < 2;
     });
     if (!tooSimilar) diverse.push(c);
   }
