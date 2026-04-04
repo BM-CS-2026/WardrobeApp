@@ -798,7 +798,16 @@ app.showColorPicker = (itemId, which) => {
       `).join('')}
     </div>
 
-    <button class="btn btn-outline" style="margin-bottom:8px" onclick="app.customSwatchColor('${itemId}','${which}')">Custom Color</button>
+    <div style="margin-bottom:12px">
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">Or describe the color:</p>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="color-text-input" placeholder="e.g. cream, burgundy, olive..." style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit">
+        <button class="btn btn-sm btn-primary" onclick="app.searchColorByText('${itemId}','${which}')" style="margin:0;white-space:nowrap">Find</button>
+      </div>
+      <div id="color-text-results" style="margin-top:8px"></div>
+    </div>
+
+    <button class="btn btn-outline" style="margin-bottom:8px" onclick="app.customSwatchColor('${itemId}','${which}')">Custom Color Sliders</button>
     ${which === 'secondary' ? `<button class="btn btn-danger btn-sm" style="margin-bottom:8px" onclick="app.deleteSecondaryColor('${itemId}')">Remove Secondary Color</button>` : ''}
     <button class="btn btn-secondary" onclick="closeSheet()">Cancel</button>
   `);
@@ -864,6 +873,125 @@ app.deleteSecondaryColor = async (itemId) => {
   const item = items.find(i => i.id === itemId);
   if (!item?.colorProfile) return;
   item.colorProfile.secondaryColors = [];
+  await db.putItem(item);
+  closeSheet();
+  if (document.getElementById('detail-overlay')?.classList.contains('open')) {
+    app.showItemDetail(itemId);
+  } else {
+    renderWardrobe();
+  }
+};
+
+// Color name → HSL lookup for text-based color search
+const COLOR_NAMES = {
+  // Whites & Creams
+  white:{h:0,s:0,l:0.97}, ivory:{h:50,s:0.5,l:0.93}, cream:{h:40,s:0.6,l:0.88}, eggshell:{h:45,s:0.3,l:0.9},
+  offwhite:{h:40,s:0.2,l:0.92}, pearl:{h:30,s:0.15,l:0.91}, snow:{h:0,s:0,l:0.98}, linen:{h:40,s:0.3,l:0.87},
+  // Blacks & Grays
+  black:{h:0,s:0,l:0.05}, charcoal:{h:0,s:0,l:0.2}, graphite:{h:0,s:0,l:0.25}, slate:{h:210,s:0.1,l:0.35},
+  gray:{h:0,s:0,l:0.5}, grey:{h:0,s:0,l:0.5}, silver:{h:0,s:0,l:0.7}, ash:{h:0,s:0,l:0.55},
+  gunmetal:{h:210,s:0.1,l:0.28}, iron:{h:0,s:0,l:0.32}, stone:{h:30,s:0.08,l:0.52},
+  // Browns
+  brown:{h:25,s:0.5,l:0.3}, chocolate:{h:20,s:0.55,l:0.22}, coffee:{h:25,s:0.4,l:0.2}, espresso:{h:20,s:0.5,l:0.15},
+  tan:{h:35,s:0.4,l:0.55}, camel:{h:35,s:0.45,l:0.5}, khaki:{h:40,s:0.35,l:0.55}, sand:{h:40,s:0.4,l:0.65},
+  beige:{h:40,s:0.3,l:0.7}, taupe:{h:30,s:0.15,l:0.45}, mocha:{h:25,s:0.35,l:0.3}, chestnut:{h:15,s:0.55,l:0.3},
+  rust:{h:15,s:0.7,l:0.35}, cinnamon:{h:20,s:0.6,l:0.35}, sienna:{h:18,s:0.55,l:0.35}, umber:{h:25,s:0.4,l:0.25},
+  cognac:{h:22,s:0.6,l:0.35}, caramel:{h:30,s:0.6,l:0.4}, tobacco:{h:28,s:0.45,l:0.3}, walnut:{h:20,s:0.4,l:0.25},
+  // Reds
+  red:{h:0,s:0.8,l:0.45}, crimson:{h:348,s:0.8,l:0.4}, scarlet:{h:5,s:0.85,l:0.45}, cherry:{h:350,s:0.75,l:0.35},
+  burgundy:{h:345,s:0.6,l:0.25}, maroon:{h:340,s:0.55,l:0.22}, wine:{h:340,s:0.5,l:0.28}, garnet:{h:345,s:0.55,l:0.3},
+  brick:{h:5,s:0.5,l:0.35}, terracotta:{h:15,s:0.55,l:0.42}, coral:{h:10,s:0.7,l:0.6}, salmon:{h:10,s:0.65,l:0.65},
+  rose:{h:345,s:0.5,l:0.6}, blush:{h:350,s:0.4,l:0.75}, raspberry:{h:340,s:0.7,l:0.35}, ruby:{h:348,s:0.75,l:0.35},
+  // Oranges
+  orange:{h:25,s:0.85,l:0.5}, tangerine:{h:20,s:0.9,l:0.52}, peach:{h:25,s:0.6,l:0.72}, apricot:{h:28,s:0.65,l:0.65},
+  amber:{h:35,s:0.8,l:0.45}, copper:{h:20,s:0.65,l:0.4}, burnt_orange:{h:20,s:0.8,l:0.4},
+  // Yellows
+  yellow:{h:50,s:0.85,l:0.55}, gold:{h:45,s:0.7,l:0.45}, mustard:{h:42,s:0.65,l:0.42}, honey:{h:40,s:0.65,l:0.5},
+  lemon:{h:55,s:0.85,l:0.6}, butter:{h:48,s:0.6,l:0.7}, champagne:{h:45,s:0.35,l:0.75}, wheat:{h:40,s:0.4,l:0.6},
+  // Greens
+  green:{h:120,s:0.5,l:0.35}, emerald:{h:140,s:0.6,l:0.35}, forest:{h:140,s:0.45,l:0.25}, sage:{h:130,s:0.2,l:0.5},
+  olive:{h:80,s:0.4,l:0.35}, army:{h:85,s:0.35,l:0.3}, hunter:{h:150,s:0.4,l:0.25}, mint:{h:150,s:0.45,l:0.65},
+  lime:{h:90,s:0.7,l:0.45}, pistachio:{h:100,s:0.35,l:0.55}, jade:{h:155,s:0.45,l:0.35}, seafoam:{h:160,s:0.35,l:0.6},
+  moss:{h:100,s:0.3,l:0.35}, pine:{h:145,s:0.4,l:0.25}, fern:{h:115,s:0.35,l:0.4}, avocado:{h:85,s:0.35,l:0.4},
+  // Blues
+  blue:{h:220,s:0.7,l:0.45}, navy:{h:220,s:0.6,l:0.22}, cobalt:{h:215,s:0.7,l:0.4}, royal:{h:225,s:0.7,l:0.4},
+  sky:{h:200,s:0.6,l:0.6}, baby_blue:{h:200,s:0.5,l:0.72}, powder:{h:200,s:0.4,l:0.75}, steel:{h:210,s:0.15,l:0.45},
+  denim:{h:215,s:0.45,l:0.4}, indigo:{h:240,s:0.5,l:0.3}, midnight:{h:230,s:0.55,l:0.18}, ocean:{h:200,s:0.55,l:0.4},
+  teal:{h:180,s:0.5,l:0.35}, cyan:{h:185,s:0.6,l:0.45}, turquoise:{h:175,s:0.55,l:0.45}, aqua:{h:180,s:0.55,l:0.55},
+  cerulean:{h:200,s:0.6,l:0.5}, cornflower:{h:220,s:0.55,l:0.6}, periwinkle:{h:230,s:0.45,l:0.65},
+  // Purples
+  purple:{h:280,s:0.55,l:0.4}, plum:{h:300,s:0.4,l:0.3}, eggplant:{h:290,s:0.4,l:0.22}, lavender:{h:270,s:0.4,l:0.7},
+  lilac:{h:280,s:0.35,l:0.7}, mauve:{h:310,s:0.25,l:0.55}, violet:{h:270,s:0.55,l:0.45}, amethyst:{h:275,s:0.45,l:0.45},
+  // Pinks
+  pink:{h:340,s:0.6,l:0.65}, hotpink:{h:330,s:0.75,l:0.5}, magenta:{h:310,s:0.7,l:0.45}, fuchsia:{h:320,s:0.7,l:0.45},
+  dusty_pink:{h:345,s:0.3,l:0.6}, nude:{h:20,s:0.3,l:0.7}, flesh:{h:20,s:0.35,l:0.7},
+};
+
+app.searchColorByText = (itemId, which) => {
+  const input = document.getElementById('color-text-input')?.value?.trim().toLowerCase();
+  if (!input) return;
+
+  const results = [];
+  const query = input.replace(/[\s_-]+/g, '');
+
+  // Search color names
+  for (const [name, c] of Object.entries(COLOR_NAMES)) {
+    const cleanName = name.replace(/_/g, '');
+    if (cleanName.includes(query) || query.includes(cleanName)) {
+      results.push({ name: name.replace(/_/g, ' '), color: { hue: c.h, saturation: c.s, lightness: c.l } });
+    }
+  }
+
+  // If no exact match, try partial matches
+  if (results.length === 0) {
+    for (const [name, c] of Object.entries(COLOR_NAMES)) {
+      const cleanName = name.replace(/_/g, '');
+      // Check if any word in the query matches
+      const words = input.split(/\s+/);
+      if (words.some(w => cleanName.includes(w) || w.includes(cleanName))) {
+        results.push({ name: name.replace(/_/g, ' '), color: { hue: c.h, saturation: c.s, lightness: c.l } });
+      }
+    }
+  }
+
+  const container = document.getElementById('color-text-results');
+  if (!container) return;
+
+  if (results.length === 0) {
+    container.innerHTML = '<p style="font-size:12px;color:var(--text-secondary)">No matching colors found. Try another term.</p>';
+    return;
+  }
+
+  // Store results for picking
+  app._textColorResults = results.map(r => r.color);
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      ${results.slice(0, 12).map((r, i) => `
+        <div style="text-align:center;cursor:pointer" onclick="app.pickTextColor('${itemId}','${which}',${i})">
+          <div style="width:40px;height:40px;border-radius:50%;background:${hslToCss(r.color)};margin:0 auto 3px;border:2px solid var(--border)"></div>
+          <div style="font-size:10px;color:var(--text-secondary)">${r.name}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+};
+
+app.pickTextColor = async (itemId, which, idx) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item?.colorProfile || !app._textColorResults) return;
+  const newColor = app._textColorResults[idx];
+
+  if (which === 'dominant') {
+    item.colorProfile.dominantColor = newColor;
+  } else {
+    if (!item.colorProfile.secondaryColors?.length) {
+      item.colorProfile.secondaryColors = [newColor];
+    } else {
+      item.colorProfile.secondaryColors[0] = newColor;
+    }
+  }
+
   await db.putItem(item);
   closeSheet();
   if (document.getElementById('detail-overlay')?.classList.contains('open')) {
