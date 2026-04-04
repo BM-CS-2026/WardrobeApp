@@ -789,11 +789,18 @@ app.showColorPicker = (itemId, which) => {
     </div>
 
     <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Tap a better match:</p>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
-      ${alternatives.map((c, i) => `
-        <div style="text-align:center;cursor:pointer" onclick="app.pickSwatchColor('${itemId}','${which}',${i})">
-          <div style="width:44px;height:44px;border-radius:50%;background:${hslToCss(c)};margin:0 auto 4px;border:2px solid var(--border)"></div>
-          <div style="font-size:10px;color:var(--text-secondary)">${colorName(c)}</div>
+    <div style="max-height:300px;overflow-y:auto;margin-bottom:16px;border:1px solid var(--border);border-radius:var(--radius);padding:8px">
+      ${alternatives.map(group => `
+        <div style="margin-bottom:8px">
+          <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px">${group.label}</div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+            ${group.colors.map((c, i) => `
+              <div style="text-align:center;cursor:pointer" onclick="app.pickSwatchColor('${itemId}','${which}','${group.label}',${i})">
+                <div style="width:36px;height:36px;border-radius:50%;background:${hslToCss(c)};margin:0 auto 2px;border:2px solid var(--border)"></div>
+                <div style="font-size:9px;color:var(--text-secondary);line-height:1.1">${colorName(c)}</div>
+              </div>
+            `).join('')}
+          </div>
         </div>
       `).join('')}
     </div>
@@ -816,34 +823,57 @@ app.showColorPicker = (itemId, which) => {
 };
 
 function generateColorAlternatives(current) {
-  const alts = [];
-  const h = current.hue;
-  const s = current.saturation;
-  const l = current.lightness;
-
-  // Darker / lighter versions
-  alts.push({ hue: h, saturation: s, lightness: Math.max(0.08, l - 0.2) });
-  alts.push({ hue: h, saturation: s, lightness: Math.min(0.92, l + 0.2) });
-
-  // More / less saturated
-  alts.push({ hue: h, saturation: Math.min(1, s + 0.25), lightness: l });
-  alts.push({ hue: h, saturation: Math.max(0, s - 0.25), lightness: l });
-
-  // Nearby hues
-  alts.push({ hue: (h + 15) % 360, saturation: s, lightness: l });
-  alts.push({ hue: (h + 345) % 360, saturation: s, lightness: l });
-
-  // Warmer / cooler
-  alts.push({ hue: (h + 30) % 360, saturation: Math.min(1, s + 0.1), lightness: l });
-  alts.push({ hue: (h + 330) % 360, saturation: Math.min(1, s + 0.1), lightness: l });
-
-  // Common clothing colors
-  alts.push({ hue: 0, saturation: 0, lightness: 0.1 });    // black
-  alts.push({ hue: 0, saturation: 0, lightness: 0.95 });   // white
-  alts.push({ hue: 220, saturation: 0.6, lightness: 0.3 }); // navy
-  alts.push({ hue: 30, saturation: 0.4, lightness: 0.35 }); // brown
-
-  return alts;
+  const c = (h,s,l) => ({ hue:h, saturation:s, lightness:l });
+  return [
+    { label: 'Neutrals', colors: [
+      c(0,0,0.03), c(0,0,0.1), c(0,0,0.2), c(0,0,0.3), c(0,0,0.4),
+      c(0,0,0.5), c(0,0,0.6), c(0,0,0.7), c(0,0,0.82), c(0,0,0.95),
+    ]},
+    { label: 'Warm Grays & Taupes', colors: [
+      c(30,0.08,0.2), c(30,0.1,0.3), c(30,0.1,0.4), c(30,0.08,0.5), c(30,0.08,0.6),
+      c(25,0.12,0.45), c(35,0.15,0.55), c(40,0.12,0.65), c(35,0.1,0.75), c(40,0.08,0.85),
+    ]},
+    { label: 'Whites & Creams', colors: [
+      c(0,0,0.97), c(40,0.2,0.92), c(50,0.5,0.93), c(40,0.6,0.88), c(45,0.3,0.9),
+      c(30,0.15,0.91), c(40,0.3,0.87), c(35,0.25,0.85), c(48,0.6,0.7), c(45,0.35,0.75),
+    ]},
+    { label: 'Browns', colors: [
+      c(20,0.5,0.15), c(25,0.4,0.2), c(20,0.55,0.22), c(25,0.5,0.28), c(15,0.55,0.3),
+      c(22,0.6,0.35), c(30,0.6,0.4), c(35,0.45,0.5), c(35,0.4,0.55), c(40,0.35,0.6),
+    ]},
+    { label: 'Reds', colors: [
+      c(345,0.6,0.2), c(340,0.55,0.25), c(345,0.6,0.3), c(350,0.75,0.35), c(0,0.8,0.4),
+      c(0,0.8,0.45), c(5,0.85,0.5), c(350,0.7,0.55), c(345,0.5,0.6), c(350,0.4,0.7),
+    ]},
+    { label: 'Oranges & Rust', colors: [
+      c(15,0.7,0.3), c(15,0.65,0.35), c(20,0.8,0.4), c(25,0.85,0.45), c(25,0.85,0.5),
+      c(20,0.7,0.55), c(25,0.6,0.6), c(28,0.65,0.65), c(25,0.6,0.7), c(30,0.5,0.75),
+    ]},
+    { label: 'Yellows & Gold', colors: [
+      c(42,0.65,0.3), c(45,0.7,0.38), c(45,0.7,0.45), c(50,0.85,0.5), c(50,0.85,0.55),
+      c(48,0.6,0.6), c(55,0.85,0.6), c(48,0.6,0.7), c(50,0.5,0.75), c(52,0.4,0.8),
+    ]},
+    { label: 'Greens', colors: [
+      c(140,0.45,0.2), c(80,0.4,0.3), c(85,0.35,0.35), c(130,0.2,0.4), c(120,0.5,0.35),
+      c(140,0.6,0.35), c(150,0.4,0.4), c(150,0.45,0.5), c(130,0.2,0.55), c(150,0.35,0.6),
+    ]},
+    { label: 'Teals & Aqua', colors: [
+      c(180,0.5,0.25), c(175,0.45,0.3), c(180,0.5,0.35), c(185,0.6,0.4), c(180,0.55,0.45),
+      c(175,0.55,0.5), c(180,0.45,0.55), c(185,0.4,0.6), c(180,0.35,0.65), c(175,0.3,0.7),
+    ]},
+    { label: 'Blues', colors: [
+      c(230,0.55,0.18), c(220,0.6,0.22), c(215,0.45,0.3), c(220,0.7,0.35), c(220,0.7,0.4),
+      c(215,0.6,0.45), c(210,0.55,0.5), c(200,0.6,0.55), c(200,0.5,0.6), c(200,0.4,0.72),
+    ]},
+    { label: 'Purples & Lavender', colors: [
+      c(290,0.4,0.2), c(280,0.5,0.3), c(270,0.55,0.35), c(280,0.55,0.4), c(270,0.5,0.45),
+      c(275,0.45,0.5), c(280,0.35,0.55), c(270,0.4,0.6), c(270,0.35,0.65), c(270,0.3,0.72),
+    ]},
+    { label: 'Pinks', colors: [
+      c(340,0.5,0.3), c(345,0.55,0.38), c(340,0.6,0.45), c(330,0.65,0.5), c(340,0.6,0.55),
+      c(345,0.5,0.6), c(350,0.4,0.65), c(345,0.35,0.7), c(340,0.3,0.75), c(350,0.25,0.8),
+    ]},
+  ];
 }
 
 function colorName(c) {
@@ -1001,10 +1031,12 @@ app.pickTextColor = async (itemId, which, idx) => {
   }
 };
 
-app.pickSwatchColor = async (itemId, which, altIdx) => {
+app.pickSwatchColor = async (itemId, which, groupLabel, colorIdx) => {
   const item = items.find(i => i.id === itemId);
   if (!item?.colorProfile || !app._colorAlternatives) return;
-  const newColor = app._colorAlternatives[altIdx];
+  const group = app._colorAlternatives.find(g => g.label === groupLabel);
+  if (!group) return;
+  const newColor = group.colors[colorIdx];
 
   if (which === 'dominant') {
     item.colorProfile.dominantColor = newColor;
@@ -1018,7 +1050,6 @@ app.pickSwatchColor = async (itemId, which, altIdx) => {
 
   await db.putItem(item);
   closeSheet();
-  // If detail view is open, refresh it; otherwise refresh wardrobe
   if (document.getElementById('detail-overlay')?.classList.contains('open')) {
     app.showItemDetail(itemId);
   } else {
