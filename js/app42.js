@@ -855,7 +855,12 @@ app.pickSwatchColor = async (itemId, which, altIdx) => {
 
   await db.putItem(item);
   closeSheet();
-  renderWardrobe();
+  // If detail view is open, refresh it; otherwise refresh wardrobe
+  if (document.getElementById('detail-overlay')?.classList.contains('open')) {
+    app.showItemDetail(itemId);
+  } else {
+    renderWardrobe();
+  }
 };
 
 app.customSwatchColor = (itemId, which) => {
@@ -903,7 +908,11 @@ app.customSwatchColor = (itemId, which) => {
     await db.putItem(item);
     document.getElementById('color-picker-overlay').classList.remove('open');
     closeSheet();
-    renderWardrobe();
+    if (document.getElementById('detail-overlay')?.classList.contains('open')) {
+      app.showItemDetail(itemId);
+    } else {
+      renderWardrobe();
+    }
   };
 
   document.getElementById('color-picker-overlay').classList.add('open');
@@ -2089,22 +2098,20 @@ app.showItemDetail = async (id) => {
       ` : ''}
 
       ${cp ? `
-        <div class="section-title">Colors</div>
-        <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
-          <div style="text-align:center">
-            <div class="swatch lg" style="background:${hslToCss(cp.dominantColor)}"></div>
+        <div class="section-title">Colors <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">(tap to change)</span></div>
+        <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px">
+          <div style="text-align:center;cursor:pointer" onclick="app.showColorPicker('${item.id}','dominant')">
+            <div class="swatch lg" style="background:${hslToCss(cp.dominantColor)};border:2px solid var(--border)"></div>
             <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Dominant</div>
+            <div style="font-size:10px;color:var(--text-secondary)">${colorName(cp.dominantColor)}</div>
           </div>
-          ${cp.secondaryColors.map(c => `
-            <div style="text-align:center">
-              <div class="swatch md" style="background:${hslToCss(c)}"></div>
+          ${cp.secondaryColors?.length > 0 ? `
+            <div style="text-align:center;cursor:pointer" onclick="app.showColorPicker('${item.id}','secondary')">
+              <div class="swatch lg" style="background:${hslToCss(cp.secondaryColors[0])};border:2px solid var(--border)"></div>
               <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Secondary</div>
+              <div style="font-size:10px;color:var(--text-secondary)">${colorName(cp.secondaryColors[0])}</div>
             </div>
-          `).join('')}
-        </div>
-        <div class="palette-bar" style="margin-bottom:16px">
-          <div style="background:${hslToCss(cp.dominantColor)}"></div>
-          ${cp.secondaryColors.map(c => `<div style="background:${hslToCss(c)}"></div>`).join('')}
+          ` : ''}
         </div>
       ` : ''}
 
