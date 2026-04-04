@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44k';
+window.APP_VERSION = '44m';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -590,7 +590,7 @@ app.wipeRemoteAndPush = async () => {
   showLoading('Wiping remote database...');
 
   try {
-    // Step 1: Destroy the remote database and recreate it
+    // Step 1: Delete all remote docs
     const remote = new PouchDB(url, { skip_setup: true });
     const allDocs = await remote.allDocs();
     const toDelete = allDocs.rows.map(row => ({
@@ -599,22 +599,40 @@ app.wipeRemoteAndPush = async () => {
       _deleted: true,
     }));
 
+    let deleted = 0, deleteErrors = 0;
     if (toDelete.length > 0) {
       document.getElementById('loading-msg').textContent = `Deleting ${toDelete.length} remote docs...`;
-      // Delete in batches of 100
-      for (let i = 0; i < toDelete.length; i += 100) {
-        const batch = toDelete.slice(i, i + 100);
-        await remote.bulkDocs(batch);
-        document.getElementById('loading-msg').textContent = `Deleting... ${Math.min(i + 100, toDelete.length)}/${toDelete.length}`;
+      for (let i = 0; i < toDelete.length; i += 50) {
+        const batch = toDelete.slice(i, i + 50);
+        try {
+          await remote.bulkDocs(batch);
+          deleted += batch.length;
+        } catch (e) {
+          // Try one by one for failed batch
+          for (const doc of batch) {
+            try { await remote.put(doc); deleted++; } catch { deleteErrors++; }
+          }
+        }
+        document.getElementById('loading-msg').textContent = `Deleting... ${deleted + deleteErrors}/${toDelete.length}`;
       }
     }
 
-    // Step 2: Push local data to the now-empty remote
-    document.getElementById('loading-msg').textContent = 'Pushing local data to cloud...';
-    const result = await db.pushOnce(url);
+    // Step 2: Push local data with progress
+    document.getElementById('loading-msg').textContent = 'Pushing local data to cloud (0 docs)...';
+    let pushed = 0;
+    const result = await new Promise((resolve, reject) => {
+      const localDB = new PouchDB('wardrobe_sync');
+      localDB.replicate.to(remote, { batch_size: 25 })
+        .on('change', (info) => {
+          pushed += info.docs_written || 0;
+          document.getElementById('loading-msg').textContent = `Pushing to cloud... ${pushed} docs uploaded`;
+        })
+        .on('complete', (info) => resolve(info))
+        .on('error', (err) => reject(err));
+    });
 
     hideLoading();
-    alert(`Done!\n\nDeleted ${toDelete.length} old remote docs.\nPushed ${result.docs_written} docs from local.\n\nCloud is now an exact copy of this device.`);
+    alert(`Done!\n\nDeleted ${deleted} remote docs (${deleteErrors} errors skipped).\nPushed ${result.docs_written || pushed} docs to cloud.\n\nCloud is now an exact copy of this device.`);
   } catch (e) {
     hideLoading();
     alert('Error: ' + (e.message || JSON.stringify(e)));
