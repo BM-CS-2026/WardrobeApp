@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44g';
+window.APP_VERSION = '44h';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -1202,7 +1202,11 @@ app.handlePhotos = async (input) => {
 
         const category = CATEGORIES.find(c => c.id === garment.category)?.id || 'shirt';
 
-        if (garment.boundingBox) {
+        if (category === 'shoes') {
+          // Skip cropping for shoes — use full original image
+          profile = await extractColorProfile(files[i]);
+          croppedBlob = files[i];
+        } else if (garment.boundingBox) {
           const result = await extractFromRegion(files[i], garment.boundingBox, category);
           croppedBlob = result.croppedBlob;
           profile = result.profile;
@@ -1595,7 +1599,7 @@ async function runReanalysis(apiKey) {
         const b = g.boundingBox;
         const isSmallCrop = b && (b.width < 0.85 || b.height < 0.85);
 
-        if (isSmallCrop) {
+        if (isSmallCrop && newCat !== 'shoes') {
           const result = await extractFromRegion(blob, b, newCat);
           const newImageId = generateId();
           await db.saveImage(newImageId, result.croppedBlob);
@@ -1626,7 +1630,7 @@ async function runReanalysis(apiKey) {
           let croppedBlob = blob;
           let profile = null;
 
-          if (g.boundingBox) {
+          if (cat !== 'shoes' && g.boundingBox) {
             const result = await extractFromRegion(blob, g.boundingBox, cat);
             croppedBlob = result.croppedBlob;
             profile = result.profile;
@@ -2046,7 +2050,7 @@ app.handleOutfitNewPhoto = async (input) => {
 
     const category = CATEGORIES.find(c => c.id === garment.category)?.id || 'shirt';
 
-    if (garment.boundingBox) {
+    if (category !== 'shoes' && garment.boundingBox) {
       const result = await extractFromRegion(file, garment.boundingBox, category);
       croppedBlob = result.croppedBlob;
       profile = result.profile;
@@ -2068,7 +2072,7 @@ app.handleOutfitNewPhoto = async (input) => {
       const g = garments[i];
       let cb = file, pr = await extractColorProfile(file);
       const gcat = CATEGORIES.find(c => c.id === g.category)?.id || 'shirt';
-      if (g.boundingBox) {
+      if (gcat !== 'shoes' && g.boundingBox) {
         const res = await extractFromRegion(file, g.boundingBox, gcat);
         cb = res.croppedBlob;
         pr = res.profile;
