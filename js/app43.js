@@ -3214,7 +3214,7 @@ app.bulkDeleteOutfits = async () => {
   for (const id of selectedOutfits) {
     const outfit = outfits.find(o => o.id === id);
     if (outfit) {
-      await db.delOutfit(id);
+      await db.deleteOutfit(id);
       const idx = outfits.indexOf(outfit);
       if (idx >= 0) outfits.splice(idx, 1);
     }
