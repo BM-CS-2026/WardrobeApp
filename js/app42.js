@@ -2132,6 +2132,7 @@ app.showItemDetail = async (id) => {
 
       <button class="btn btn-primary" onclick="app.generateFromItem('${item.id}')">✨ Generate Outfits</button>
       <button class="btn btn-outline" style="margin-top:8px" onclick="app.pickSecondItem('${item.id}')">+ Add Another Item & Generate</button>
+      ${cp ? `<button class="btn btn-outline" style="margin-top:8px" onclick="app.showColorMatching('${item.id}')">🎨 Potential Color Matching</button>` : ''}
     </div>
   `);
   lazyLoadImages();
@@ -2272,6 +2273,166 @@ app.deleteItem = async (id) => {
 // ══════════════════════════════════════
 // ── PALETTES TAB ──
 // ══════════════════════════════════════
+
+// ── Color Matching from Item ──
+
+app.showColorMatching = (itemId) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item?.colorProfile) return;
+  const base = item.colorProfile.dominantColor;
+  const h = base.hue, s = base.saturation, l = base.lightness;
+
+  // Generate palettes using color science harmony rules
+  const harmonies = [
+    {
+      name: 'Complementary',
+      desc: 'Opposite on the color wheel — bold, high-contrast combinations.',
+      colors: [
+        base,
+        { hue: (h + 180) % 360, saturation: s, lightness: l },
+        { hue: h, saturation: Math.max(0.1, s - 0.15), lightness: Math.min(0.85, l + 0.2) },
+        { hue: (h + 180) % 360, saturation: Math.max(0.1, s - 0.15), lightness: Math.min(0.85, l + 0.15) },
+      ],
+    },
+    {
+      name: 'Analogous',
+      desc: 'Neighboring colors — natural, harmonious, easy to wear.',
+      colors: [
+        base,
+        { hue: (h + 30) % 360, saturation: s, lightness: l },
+        { hue: (h + 330) % 360, saturation: s, lightness: l },
+        { hue: (h + 15) % 360, saturation: Math.max(0.1, s - 0.1), lightness: Math.min(0.85, l + 0.15) },
+      ],
+    },
+    {
+      name: 'Triadic',
+      desc: 'Three colors evenly spaced — vibrant and balanced.',
+      colors: [
+        base,
+        { hue: (h + 120) % 360, saturation: s, lightness: l },
+        { hue: (h + 240) % 360, saturation: s, lightness: l },
+        { hue: h, saturation: Math.max(0.05, s - 0.2), lightness: Math.min(0.9, l + 0.25) },
+      ],
+    },
+    {
+      name: 'Split Complementary',
+      desc: 'Two colors adjacent to the complement — contrast with less tension.',
+      colors: [
+        base,
+        { hue: (h + 150) % 360, saturation: s, lightness: l },
+        { hue: (h + 210) % 360, saturation: s, lightness: l },
+        { hue: h, saturation: Math.max(0.05, s - 0.15), lightness: Math.min(0.9, l + 0.2) },
+      ],
+    },
+    {
+      name: 'Monochromatic',
+      desc: 'Same hue, different shades — elegant, sophisticated, always safe.',
+      colors: [
+        { hue: h, saturation: s, lightness: Math.max(0.1, l - 0.2) },
+        base,
+        { hue: h, saturation: Math.max(0.05, s - 0.15), lightness: Math.min(0.85, l + 0.2) },
+        { hue: h, saturation: Math.max(0.05, s - 0.25), lightness: Math.min(0.92, l + 0.35) },
+      ],
+    },
+    {
+      name: 'Neutral Pairing',
+      desc: 'Your color with black, white, and gray — classic and versatile.',
+      colors: [
+        base,
+        { hue: 0, saturation: 0, lightness: 0.1 },
+        { hue: 0, saturation: 0, lightness: 0.5 },
+        { hue: 0, saturation: 0, lightness: 0.93 },
+      ],
+    },
+  ];
+
+  closeDetail();
+  // Switch to palettes tab
+  currentTab = 'palettes';
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-bar button')[1].classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-palettes').classList.add('active');
+
+  const view = document.getElementById('view-palettes');
+  view.innerHTML = `
+    <div class="view-header">
+      <button class="back-btn" onclick="app.showItemDetail('${item.id}')" style="font-size:14px;padding:4px 12px;border:1.5px solid var(--border);border-radius:16px;background:var(--card)">‹ Back</button>
+      <h1 style="font-size:17px;flex:1">Color Matching</h1>
+    </div>
+
+    <div style="padding:0 16px 8px;display:flex;align-items:center;gap:12px">
+      ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:50px;height:50px;border-radius:10px;object-fit:cover">` : ''}
+      <div>
+        <div style="font-size:14px;font-weight:600">${esc(item.name)}</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+          <div style="width:18px;height:18px;border-radius:50%;background:${hslToCss(base)};border:1px solid var(--border)"></div>
+          <span style="font-size:12px;color:var(--text-secondary)">${colorName(base)}</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:0 16px 24px">
+      ${harmonies.map(harmony => `
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px">
+          <div style="font-size:15px;font-weight:700;margin-bottom:2px">${harmony.name}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">${harmony.desc}</div>
+          <div class="palette-bar" style="height:48px;margin-bottom:10px;border-radius:var(--radius-sm);overflow:hidden">
+            ${harmony.colors.map(c => `<div style="background:${hslToCss(c)}"></div>`).join('')}
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            ${harmony.colors.map(c => `
+              <div style="display:flex;align-items:center;gap:4px">
+                <div style="width:14px;height:14px;border-radius:50%;background:${hslToCss(c)};border:1px solid var(--border)"></div>
+                <span style="font-size:11px;color:var(--text-secondary)">${colorName(c)}</span>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-sm btn-outline" onclick="app.saveMatchPalette('${item.id}','${harmony.name}')">Save as Palette</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  lazyLoadImages();
+};
+
+app.saveMatchPalette = async (itemId, harmonyName) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item?.colorProfile) return;
+  const base = item.colorProfile.dominantColor;
+  const h = base.hue, s = base.saturation, l = base.lightness;
+
+  // Regenerate the specific harmony colors
+  const harmonyMap = {
+    'Complementary': [base, {hue:(h+180)%360,saturation:s,lightness:l}, {hue:h,saturation:Math.max(0.1,s-0.15),lightness:Math.min(0.85,l+0.2)}, {hue:(h+180)%360,saturation:Math.max(0.1,s-0.15),lightness:Math.min(0.85,l+0.15)}],
+    'Analogous': [base, {hue:(h+30)%360,saturation:s,lightness:l}, {hue:(h+330)%360,saturation:s,lightness:l}, {hue:(h+15)%360,saturation:Math.max(0.1,s-0.1),lightness:Math.min(0.85,l+0.15)}],
+    'Triadic': [base, {hue:(h+120)%360,saturation:s,lightness:l}, {hue:(h+240)%360,saturation:s,lightness:l}, {hue:h,saturation:Math.max(0.05,s-0.2),lightness:Math.min(0.9,l+0.25)}],
+    'Split Complementary': [base, {hue:(h+150)%360,saturation:s,lightness:l}, {hue:(h+210)%360,saturation:s,lightness:l}, {hue:h,saturation:Math.max(0.05,s-0.15),lightness:Math.min(0.9,l+0.2)}],
+    'Monochromatic': [{hue:h,saturation:s,lightness:Math.max(0.1,l-0.2)}, base, {hue:h,saturation:Math.max(0.05,s-0.15),lightness:Math.min(0.85,l+0.2)}, {hue:h,saturation:Math.max(0.05,s-0.25),lightness:Math.min(0.92,l+0.35)}],
+    'Neutral Pairing': [base, {hue:0,saturation:0,lightness:0.1}, {hue:0,saturation:0,lightness:0.5}, {hue:0,saturation:0,lightness:0.93}],
+  };
+
+  const colors = harmonyMap[harmonyName];
+  if (!colors) return;
+
+  const palette = createColorPalette({
+    name: `${colorName(base)} ${harmonyName}`,
+    colors,
+    harmonyType: harmonyName.toLowerCase().replace(/\s+/g, '_'),
+  });
+
+  await db.putPalette(palette);
+  palettes.push(palette);
+
+  openSheet(`
+    <div style="text-align:center;padding:24px">
+      <div style="font-size:48px;margin-bottom:12px">🎨</div>
+      <h2>Palette Saved</h2>
+      <p style="color:var(--text-secondary);margin-bottom:16px">"${esc(palette.name)}" added to your palettes.</p>
+      <button class="btn btn-primary" onclick="closeSheet()">OK</button>
+    </div>
+  `);
+};
 
 function renderPalettes() {
   const view = document.getElementById('view-palettes');
