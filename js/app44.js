@@ -495,6 +495,10 @@ app.showSyncSettings = () => {
         🔍 Find Missing Images
       </button>
 
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.restoreImagesFromFiles()">
+        📂 Restore Images from Upload Files
+      </button>
+
       <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.showDbStats()">
         📊 Show Database Details
       </button>
@@ -839,6 +843,85 @@ app.findMissingImages = async () => {
   }
   alert(msg);
   console.log('[FindMissing]', { hasImage, missing, totalImages: allImages.rows.length });
+};
+
+app.restoreImagesFromFiles = async () => {
+  // Let user pick the upload HTML files that contain embedded images
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.html';
+  input.multiple = true;
+  input.onchange = async () => {
+    if (!input.files.length) return;
+    closeSheet();
+    showLoading('Reading upload files...');
+
+    const localDB = new PouchDB('wardrobe_sync');
+    let totalFound = 0, restored = 0, skipped = 0, errors = 0;
+
+    for (const file of input.files) {
+      document.getElementById('loading-msg').textContent = `Reading ${file.name}...`;
+      const text = await file.text();
+      // Extract the ITEMS array from the upload HTML
+      const match = text.match(/const ITEMS = (\[[\s\S]*?\]);\s*\n/);
+      if (!match) {
+        console.warn(`No ITEMS array found in ${file.name}`);
+        continue;
+      }
+      let items;
+      try { items = JSON.parse(match[1]); } catch { continue; }
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item.imageId || !item.dataUrl) continue;
+        totalFound++;
+        const docId = 'images:' + item.imageId;
+
+        // Check if image already exists
+        try {
+          const existing = await localDB.get(docId);
+          if (existing.dataUrl) { skipped++; continue; }  // image already there
+        } catch (e) {
+          // 404 or deleted — need to restore
+        }
+
+        // Resize the image before saving
+        let dataUrl = item.dataUrl;
+        try {
+          dataUrl = await _resizeImageForSync(dataUrl);
+        } catch {}
+
+        // Force-save: handle both new docs and deleted tombstones
+        const doc = { _id: docId, type: 'images', dataUrl };
+        try {
+          await localDB.put(doc);
+          restored++;
+        } catch (e) {
+          if (e.status === 409) {
+            // Tombstone exists — find its rev via changes API
+            try {
+              const changes = await localDB.changes({ doc_ids: [docId], limit: 1 });
+              if (changes.results.length > 0) {
+                doc._rev = changes.results[0].changes[0].rev;
+                await localDB.put(doc);
+                restored++;
+              } else { errors++; }
+            } catch { errors++; }
+          } else { errors++; }
+        }
+
+        if (i % 2 === 0) {
+          document.getElementById('loading-msg').textContent = `${file.name}: ${i + 1}/${items.length} (restored ${restored})`;
+        }
+      }
+    }
+
+    await loadData();
+    hideLoading();
+    renderCurrentTab();
+    alert(`Done!\n\nFound: ${totalFound} images in upload files\nRestored: ${restored}\nAlready existed: ${skipped}\nErrors: ${errors}`);
+  };
+  input.click();
 };
 
 app.showDbStats = async () => {
