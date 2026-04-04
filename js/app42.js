@@ -737,11 +737,26 @@ function renderItemCard(item) {
         <div class="name">${esc(item.name)}</div>
         <div class="meta">
           ${cp ? `<div class="swatch" style="background:${hslToCss(cp.dominantColor)}" onclick="event.stopPropagation(); app.showColorPicker('${item.id}','dominant')"></div>` : ''}
-          ${(cp?.secondaryColors || []).length > 0 ? `<div class="swatch" style="background:${hslToCss(cp.secondaryColors[0])};width:12px;height:12px" onclick="event.stopPropagation(); app.showColorPicker('${item.id}','secondary')"></div>` : ''}
+          ${hasDistinctSecondary(cp) ? `<div class="swatch" style="background:${hslToCss(cp.secondaryColors[0])};width:12px;height:12px" onclick="event.stopPropagation(); app.showColorPicker('${item.id}','secondary')"></div>` : ''}
         </div>
       </div>
     </div>
   `;
+}
+
+// Check if secondary color is meaningfully different from dominant
+function hasDistinctSecondary(cp) {
+  if (!cp?.secondaryColors?.length) return false;
+  const d = cp.dominantColor, s = cp.secondaryColors[0];
+  // Hue difference (circular)
+  const hueDiff = Math.abs(d.hue - s.hue);
+  const hueGap = Math.min(hueDiff, 360 - hueDiff);
+  // Lightness and saturation differences
+  const lightDiff = Math.abs(d.lightness - s.lightness);
+  const satDiff = Math.abs(d.saturation - s.saturation);
+  // Only show secondary if clearly a different color
+  // (big hue shift, OR large lightness/saturation difference)
+  return hueGap > 30 || lightDiff > 0.25 || satDiff > 0.3;
 }
 
 // ── Color Swatch Picker ──
@@ -2105,7 +2120,7 @@ app.showItemDetail = async (id) => {
             <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Dominant</div>
             <div style="font-size:10px;color:var(--text-secondary)">${colorName(cp.dominantColor)}</div>
           </div>
-          ${cp.secondaryColors?.length > 0 ? `
+          ${hasDistinctSecondary(cp) ? `
             <div style="text-align:center;cursor:pointer" onclick="app.showColorPicker('${item.id}','secondary')">
               <div class="swatch lg" style="background:${hslToCss(cp.secondaryColors[0])};border:2px solid var(--border)"></div>
               <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Secondary</div>
