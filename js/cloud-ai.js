@@ -93,7 +93,7 @@ export async function generateOutfitImage(itemDescriptions, apiKey) {
     return typeof d === 'object' ? d.name : d;
   }).join('; ');
 
-  const prompt = `Ultra-realistic professional fashion editorial photo. A tall, lean and athletic man in his late 40s with dark brown wavy/slightly tousled hair, short salt-and-pepper stubble beard, olive/Mediterranean skin tone, angular face with defined jawline, wearing rectangular brown-frame glasses. He is wearing EXACTLY these items — match each color and material precisely, do not substitute or change any item: ${itemList}. Full body standing pose, neutral light gray studio background. The clothing colors, textures, and styles must match the descriptions exactly. Studio lighting, sharp detail on fabric weave and texture. No text, no watermarks.`;
+  const prompt = `Ultra-realistic professional fashion editorial photo. FULL BODY shot from head to feet — the entire person must be visible including the top of the head and the bottom of the shoes, with space above the head and below the feet. A tall, lean and athletic man in his late 40s with dark brown wavy/slightly tousled hair, short salt-and-pepper stubble beard, olive/Mediterranean skin tone, angular face with defined jawline, wearing rectangular brown-frame glasses. He is wearing EXACTLY these items — match each color and material precisely, do not substitute or change any item: ${itemList}. Standing straight in a relaxed pose, neutral light gray studio background. The camera is positioned to capture the COMPLETE outfit from head to toe — shoes fully visible at the bottom, head fully visible at the top. The clothing colors, textures, and styles must match the descriptions exactly. Studio lighting, sharp detail on fabric weave and texture. No text, no watermarks.`;
 
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
@@ -105,7 +105,7 @@ export async function generateOutfitImage(itemDescriptions, apiKey) {
       model: 'dall-e-3',
       prompt,
       n: 1,
-      size: '1024x1024',
+      size: '1024x1792',
       quality: 'standard',
       response_format: 'b64_json',
     }),
