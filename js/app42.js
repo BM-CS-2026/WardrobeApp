@@ -491,7 +491,10 @@ app.saveSyncUrl = async () => {
   showLoading('Syncing data...');
   try {
     await db.pullOnce(url, (info) => {
-      document.getElementById('loading-msg').textContent = `Syncing... ${info.docs_written} docs`;
+      const msg = info.retrying
+        ? `Retrying... (attempt ${info.attempt}, ${info.docs_written} docs so far)`
+        : `Syncing... ${info.docs_written} docs`;
+      document.getElementById('loading-msg').textContent = msg;
     });
   } catch (e) {
     console.warn('[Sync] Pull failed:', e);
@@ -516,7 +519,10 @@ app.forceResync = async () => {
   showLoading('Pulling all data from cloud...');
   try {
     const result = await db.pullOnce(url, (info) => {
-      document.getElementById('loading-msg').textContent = `Pulling... ${info.docs_written} docs`;
+      const msg = info.retrying
+        ? `Retrying... (attempt ${info.attempt}, ${info.docs_written} docs so far)`
+        : `Pulling... ${info.docs_written} docs (attempt ${info.attempt || 1})`;
+      document.getElementById('loading-msg').textContent = msg;
     });
     await loadData();
     renderCurrentTab();

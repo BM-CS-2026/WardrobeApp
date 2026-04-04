@@ -261,14 +261,38 @@ function makeRemoteDB(remoteUrl) {
   return new PouchDB(cleanUrl, { skip_setup: true });
 }
 
-export function pullOnce(remoteUrl, onProgress) {
-  const remote = makeRemoteDB(remoteUrl);
-  return new Promise((resolve, reject) => {
-    db.replicate.from(remote, { batch_size: 25 })
-      .on('change', (info) => { if (onProgress) onProgress(info); })
-      .on('complete', (info) => resolve(info))
-      .on('error', (err) => reject(err));
-  });
+export async function pullOnce(remoteUrl, onProgress) {
+  const MAX_RETRIES = 20;
+  let totalWritten = 0;
+  let lastResult = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const remote = makeRemoteDB(remoteUrl);
+      const result = await new Promise((resolve, reject) => {
+        db.replicate.from(remote, { batch_size: 25 })
+          .on('change', (info) => {
+            totalWritten += info.docs_written || 0;
+            if (onProgress) onProgress({ ...info, docs_written: totalWritten, attempt: attempt + 1 });
+          })
+          .on('complete', (info) => resolve(info))
+          .on('error', (err) => reject(err));
+      });
+      // Success — return combined result
+      result.docs_written = totalWritten;
+      return result;
+    } catch (err) {
+      console.warn(`[Sync] Pull attempt ${attempt + 1} failed:`, err.message || err);
+      if (onProgress) onProgress({ docs_written: totalWritten, attempt: attempt + 1, retrying: true });
+      // Brief pause before retry
+      await new Promise(r => setTimeout(r, 1500));
+      // Continue — next attempt will pick up where it left off (PouchDB tracks checkpoints)
+    }
+  }
+  // If we got here, all retries failed but we may have pulled some data
+  const finalResult = { docs_written: totalWritten };
+  if (totalWritten > 0) return finalResult;
+  throw new Error('Pull failed after ' + MAX_RETRIES + ' attempts');
 }
 
 export function pushOnce(remoteUrl) {
