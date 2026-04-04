@@ -75,7 +75,7 @@ export function scoreColor(score) {
 export const CATEGORIES = [
   { id: 'shirt', name: 'Shirt', icon: '👔', required: true },
   { id: 'pants', name: 'Pants', icon: '👖', required: true },
-  { id: 'shoes', name: 'Shoes', icon: '👟', required: false },
+  { id: 'shoes', name: 'Shoes', icon: '👟', required: true },
   { id: 'belt', name: 'Belt', icon: '🪢', required: false },
   { id: 'jacket', name: 'Jacket', icon: '🧥', required: false },
 ];
