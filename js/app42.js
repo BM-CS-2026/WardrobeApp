@@ -2791,8 +2791,6 @@ function renderOutfits() {
     <div class="view-header">
       <h1>Outfits</h1>
       <div style="display:flex;gap:8px">
-        ${missingCount > 0 ? `<button class="btn-icon" onclick="app.generateMissingImages()" title="Generate missing AI images" style="font-size:14px;background:var(--accent);color:white;padding:4px 10px;border-radius:14px;white-space:nowrap">${missingCount} missing</button>` : ''}
-        <button class="btn-icon" onclick="app.showWishlist()" title="Wish List" style="font-size:16px;${wishlist.length ? 'background:var(--warning);color:white' : ''}">💝</button>
         ${saved.some(o => o.favorite) ? `<button class="btn-icon" onclick="app.toggleFavFilter()" title="Favorites" style="font-size:16px;${showFavoritesOnly ? 'background:var(--accent);color:white' : ''}">❤️</button>` : ''}
       </div>
     </div>
