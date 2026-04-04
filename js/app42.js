@@ -793,6 +793,7 @@ app.showColorPicker = (itemId, which) => {
     </div>
 
     <button class="btn btn-outline" style="margin-bottom:8px" onclick="app.customSwatchColor('${itemId}','${which}')">Custom Color</button>
+    ${which === 'secondary' ? `<button class="btn btn-danger btn-sm" style="margin-bottom:8px" onclick="app.deleteSecondaryColor('${itemId}')">Remove Secondary Color</button>` : ''}
     <button class="btn btn-secondary" onclick="closeSheet()">Cancel</button>
   `);
   app._colorAlternatives = alternatives;
@@ -852,6 +853,19 @@ function colorName(c) {
   if (l > 0.7) return 'Light ' + name;
   return name;
 }
+
+app.deleteSecondaryColor = async (itemId) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item?.colorProfile) return;
+  item.colorProfile.secondaryColors = [];
+  await db.putItem(item);
+  closeSheet();
+  if (document.getElementById('detail-overlay')?.classList.contains('open')) {
+    app.showItemDetail(itemId);
+  } else {
+    renderWardrobe();
+  }
+};
 
 app.pickSwatchColor = async (itemId, which, altIdx) => {
   const item = items.find(i => i.id === itemId);
