@@ -736,13 +736,178 @@ function renderItemCard(item) {
       <div class="info">
         <div class="name">${esc(item.name)}</div>
         <div class="meta">
-          ${cp ? `<div class="swatch" style="background:${hslToCss(cp.dominantColor)}"></div>` : ''}
-          ${(cp?.secondaryColors || []).slice(0, 2).map(c => `<div class="swatch" style="background:${hslToCss(c)};width:12px;height:12px"></div>`).join('')}
+          ${cp ? `<div class="swatch" style="background:${hslToCss(cp.dominantColor)}" onclick="event.stopPropagation(); app.showColorPicker('${item.id}','dominant')"></div>` : ''}
+          ${(cp?.secondaryColors || []).length > 0 ? `<div class="swatch" style="background:${hslToCss(cp.secondaryColors[0])};width:12px;height:12px" onclick="event.stopPropagation(); app.showColorPicker('${item.id}','secondary')"></div>` : ''}
         </div>
       </div>
     </div>
   `;
 }
+
+// ── Color Swatch Picker ──
+
+app.showColorPicker = (itemId, which) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item?.colorProfile) return;
+  const cp = item.colorProfile;
+  const current = which === 'dominant' ? cp.dominantColor : cp.secondaryColors?.[0];
+  if (!current) return;
+
+  // Generate alternative colors based on current color with variations
+  const alternatives = generateColorAlternatives(current);
+
+  openSheet(`
+    <h2>Pick ${which === 'dominant' ? 'Dominant' : 'Secondary'} Color</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:4px">${esc(item.name)}</p>
+    ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:100%;max-height:150px;object-fit:contain;border-radius:var(--radius);background:var(--bg);margin-bottom:12px">` : ''}
+
+    <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Current:</p>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <div style="width:36px;height:36px;border-radius:50%;background:${hslToCss(current)};border:3px solid var(--accent);flex-shrink:0"></div>
+      <span style="font-size:13px;color:var(--text-secondary)">${colorName(current)}</span>
+    </div>
+
+    <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Tap a better match:</p>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+      ${alternatives.map((c, i) => `
+        <div style="text-align:center;cursor:pointer" onclick="app.pickSwatchColor('${itemId}','${which}',${i})">
+          <div style="width:44px;height:44px;border-radius:50%;background:${hslToCss(c)};margin:0 auto 4px;border:2px solid var(--border)"></div>
+          <div style="font-size:10px;color:var(--text-secondary)">${colorName(c)}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <button class="btn btn-outline" style="margin-bottom:8px" onclick="app.customSwatchColor('${itemId}','${which}')">Custom Color</button>
+    <button class="btn btn-secondary" onclick="closeSheet()">Cancel</button>
+  `);
+  app._colorAlternatives = alternatives;
+  lazyLoadImages();
+};
+
+function generateColorAlternatives(current) {
+  const alts = [];
+  const h = current.hue;
+  const s = current.saturation;
+  const l = current.lightness;
+
+  // Darker / lighter versions
+  alts.push({ hue: h, saturation: s, lightness: Math.max(0.08, l - 0.2) });
+  alts.push({ hue: h, saturation: s, lightness: Math.min(0.92, l + 0.2) });
+
+  // More / less saturated
+  alts.push({ hue: h, saturation: Math.min(1, s + 0.25), lightness: l });
+  alts.push({ hue: h, saturation: Math.max(0, s - 0.25), lightness: l });
+
+  // Nearby hues
+  alts.push({ hue: (h + 15) % 360, saturation: s, lightness: l });
+  alts.push({ hue: (h + 345) % 360, saturation: s, lightness: l });
+
+  // Warmer / cooler
+  alts.push({ hue: (h + 30) % 360, saturation: Math.min(1, s + 0.1), lightness: l });
+  alts.push({ hue: (h + 330) % 360, saturation: Math.min(1, s + 0.1), lightness: l });
+
+  // Common clothing colors
+  alts.push({ hue: 0, saturation: 0, lightness: 0.1 });    // black
+  alts.push({ hue: 0, saturation: 0, lightness: 0.95 });   // white
+  alts.push({ hue: 220, saturation: 0.6, lightness: 0.3 }); // navy
+  alts.push({ hue: 30, saturation: 0.4, lightness: 0.35 }); // brown
+
+  return alts;
+}
+
+function colorName(c) {
+  const h = c.hue, s = c.saturation, l = c.lightness;
+  if (l < 0.12) return 'Black';
+  if (l > 0.9 && s < 0.1) return 'White';
+  if (s < 0.08) return l < 0.4 ? 'Charcoal' : l < 0.65 ? 'Gray' : 'Light Gray';
+  if (s < 0.2) return l < 0.4 ? 'Dark Gray' : 'Gray';
+
+  let name = '';
+  if (h < 15 || h >= 345) name = 'Red';
+  else if (h < 40) name = 'Orange';
+  else if (h < 55) name = 'Yellow';
+  else if (h < 80) name = 'Olive';
+  else if (h < 160) name = 'Green';
+  else if (h < 195) name = 'Teal';
+  else if (h < 250) name = 'Blue';
+  else if (h < 290) name = 'Purple';
+  else if (h < 345) name = 'Pink';
+
+  if (l < 0.3) return 'Dark ' + name;
+  if (l > 0.7) return 'Light ' + name;
+  return name;
+}
+
+app.pickSwatchColor = async (itemId, which, altIdx) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item?.colorProfile || !app._colorAlternatives) return;
+  const newColor = app._colorAlternatives[altIdx];
+
+  if (which === 'dominant') {
+    item.colorProfile.dominantColor = newColor;
+  } else {
+    if (!item.colorProfile.secondaryColors?.length) {
+      item.colorProfile.secondaryColors = [newColor];
+    } else {
+      item.colorProfile.secondaryColors[0] = newColor;
+    }
+  }
+
+  await db.putItem(item);
+  closeSheet();
+  renderWardrobe();
+};
+
+app.customSwatchColor = (itemId, which) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item?.colorProfile) return;
+  const current = which === 'dominant' ? item.colorProfile.dominantColor : item.colorProfile.secondaryColors?.[0];
+  if (!current) return;
+
+  // Use the app's existing color picker
+  const cpHue = document.getElementById('cp-hue');
+  const cpSat = document.getElementById('cp-sat');
+  const cpLight = document.getElementById('cp-light');
+  cpHue.value = Math.round(current.hue);
+  cpSat.value = Math.round(current.saturation * 100);
+  cpLight.value = Math.round(current.lightness * 100);
+
+  // Update preview
+  const updatePreview = () => {
+    const h = cpHue.value, s = cpSat.value, l = cpLight.value;
+    document.getElementById('cp-preview').style.background = `hsl(${h},${s}%,${l}%)`;
+    document.getElementById('cp-hue-val').textContent = h + '°';
+    document.getElementById('cp-sat-val').textContent = s + '%';
+    document.getElementById('cp-light-val').textContent = l + '%';
+  };
+  updatePreview();
+  cpHue.oninput = updatePreview;
+  cpSat.oninput = updatePreview;
+  cpLight.oninput = updatePreview;
+
+  document.getElementById('cp-done').onclick = async () => {
+    const newColor = {
+      hue: parseFloat(cpHue.value),
+      saturation: parseFloat(cpSat.value) / 100,
+      lightness: parseFloat(cpLight.value) / 100,
+    };
+    if (which === 'dominant') {
+      item.colorProfile.dominantColor = newColor;
+    } else {
+      if (!item.colorProfile.secondaryColors?.length) {
+        item.colorProfile.secondaryColors = [newColor];
+      } else {
+        item.colorProfile.secondaryColors[0] = newColor;
+      }
+    }
+    await db.putItem(item);
+    document.getElementById('color-picker-overlay').classList.remove('open');
+    closeSheet();
+    renderWardrobe();
+  };
+
+  document.getElementById('color-picker-overlay').classList.add('open');
+};
 
 // ── Add Flow ──
 
