@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44f';
+window.APP_VERSION = '44g';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -1919,7 +1919,6 @@ let outfitSeedItem = null;
 let outfitVibe = null;
 let outfitWeather = null;
 let outfitNoJeans = false;
-  outfitNoBlazer = false;
 let outfitNoBlazer = false;
 
 app._seedSelections = new Set();
@@ -1932,7 +1931,6 @@ app.startCreateOutfit = () => {
   outfitVibe = null;
   outfitWeather = null;
   outfitNoJeans = false;
-  outfitNoBlazer = false;
   outfitNoBlazer = false;
   showOutfitStep1();
 };
