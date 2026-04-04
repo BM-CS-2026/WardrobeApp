@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44p';
+window.APP_VERSION = '44q';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -651,56 +651,64 @@ app.wipeRemoteAndPush = async () => {
       }
     }
 
-    // Step 2: Auto-resize oversized images before pushing
+    // Step 2: Read all local docs, resize oversized images, push one by one
     const localDB = new PouchDB('wardrobe_sync');
-    const allImgs = await localDB.allDocs({startkey:'images:', endkey:'images:\ufff0', include_docs:true});
-    let resizeCount = 0;
-    const oversized = allImgs.rows.filter(r => r.doc.dataUrl && r.doc.dataUrl.length > 500000);
-    for (let ri = 0; ri < oversized.length; ri++) {
-      const doc = oversized[ri].doc;
-      document.getElementById('loading-msg').textContent = `Resizing large images... ${ri + 1}/${oversized.length}`;
-      try {
-        const newUrl = await _resizeImageForSync(doc.dataUrl);
-        if (newUrl.length < doc.dataUrl.length) {
-          doc.dataUrl = newUrl;
-          await localDB.put(doc);
-          resizeCount++;
-        }
-      } catch {}
-    }
+    const allLocal = await localDB.allDocs({ include_docs: true });
+    const totalDocs = allLocal.rows.length;
+    let pushed = 0, pushErrors = 0, resizeCount = 0, skipped = 0;
 
-    // Step 3: Push docs in small batches with progress
-    const localDocs = await localDB.allDocs();
-    const totalDocs = localDocs.rows.length;
-    let pushed = 0, pushErrors = 0;
+    document.getElementById('loading-msg').textContent = `Preparing ${totalDocs} docs...`;
 
-    document.getElementById('loading-msg').textContent = `Pushing 0/${totalDocs} docs to cloud...`;
+    for (let i = 0; i < totalDocs; i++) {
+      const doc = allLocal.rows[i].doc;
+      const docSize = JSON.stringify(doc).length;
 
-    for (let i = 0; i < totalDocs; i += 5) {
-      const batch = localDocs.rows.slice(i, i + 5).map(r => r.id);
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // Auto-resize oversized image docs
+      if (doc.dataUrl && doc.dataUrl.length > 500000) {
         try {
-          const result = await localDB.replicate.to(remote, { doc_ids: batch });
-          pushed += result.docs_written || 0;
-          break;
-        } catch (e) {
-          if (attempt < 2) {
-            await new Promise(r => setTimeout(r, 2000));
-          } else {
-            for (const docId of batch) {
-              try {
-                await localDB.replicate.to(remote, { doc_ids: [docId] });
-                pushed++;
-              } catch { pushErrors++; }
-            }
+          const newUrl = await _resizeImageForSync(doc.dataUrl);
+          if (newUrl.length < doc.dataUrl.length) {
+            doc.dataUrl = newUrl;
+            await localDB.put(doc);
+            resizeCount++;
           }
-        }
+        } catch {}
       }
-      document.getElementById('loading-msg').textContent = `Pushing ${pushed}/${totalDocs} docs to cloud... (${pushErrors} errors)`;
+
+      // Skip docs still over 900KB after resize (Cloudant limit ~1MB)
+      const finalSize = JSON.stringify(doc).length;
+      if (finalSize > 900000) {
+        pushErrors++;
+        document.getElementById('loading-msg').textContent = `Pushing ${pushed}/${totalDocs}... (${pushErrors} too large, skipped)`;
+        continue;
+      }
+
+      // Push single doc with 15s timeout
+      try {
+        const { _rev, ...cleanDoc } = doc;
+        await Promise.race([
+          remote.put(cleanDoc).catch(async (e) => {
+            if (e.status === 409) {
+              // Conflict — get remote rev and update
+              const existing = await remote.get(doc._id);
+              cleanDoc._rev = existing._rev;
+              await remote.put(cleanDoc);
+            } else { throw e; }
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000)),
+        ]);
+        pushed++;
+      } catch (e) {
+        pushErrors++;
+      }
+
+      if (i % 3 === 0 || i === totalDocs - 1) {
+        document.getElementById('loading-msg').textContent = `Pushing ${pushed}/${totalDocs} docs... (${pushErrors} errors)`;
+      }
     }
 
     hideLoading();
-    alert(`Done!\n\n${resizeCount > 0 ? 'Resized ' + resizeCount + ' oversized images.\n' : ''}Deleted ${deleted} remote docs.\nPushed ${pushed}/${totalDocs} docs to cloud.\n${pushErrors > 0 ? pushErrors + ' failed.' : 'No errors!'}\n\nCloud is now synced with this device.`);
+    alert(`Done!\n\n${resizeCount > 0 ? 'Resized ' + resizeCount + ' images.\n' : ''}Deleted ${deleted} remote docs.\nPushed ${pushed}/${totalDocs} docs.\n${pushErrors > 0 ? pushErrors + ' skipped (too large or timeout).' : 'No errors!'}`);
   } catch (e) {
     hideLoading();
     alert('Error: ' + (e.message || JSON.stringify(e)));
