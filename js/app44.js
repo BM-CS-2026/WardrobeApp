@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44m';
+window.APP_VERSION = '44n';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -617,22 +617,40 @@ app.wipeRemoteAndPush = async () => {
       }
     }
 
-    // Step 2: Push local data with progress
-    document.getElementById('loading-msg').textContent = 'Pushing local data to cloud (0 docs)...';
-    let pushed = 0;
-    const result = await new Promise((resolve, reject) => {
-      const localDB = new PouchDB('wardrobe_sync');
-      localDB.replicate.to(remote, { batch_size: 25 })
-        .on('change', (info) => {
-          pushed += info.docs_written || 0;
-          document.getElementById('loading-msg').textContent = `Pushing to cloud... ${pushed} docs uploaded`;
-        })
-        .on('complete', (info) => resolve(info))
-        .on('error', (err) => reject(err));
-    });
+    // Step 2: Push local data one doc at a time with progress + auto-retry
+    const localDB = new PouchDB('wardrobe_sync');
+    const localDocs = await localDB.allDocs();
+    const totalDocs = localDocs.rows.length;
+    let pushed = 0, pushErrors = 0;
+
+    document.getElementById('loading-msg').textContent = `Pushing 0/${totalDocs} docs to cloud...`;
+
+    for (let i = 0; i < totalDocs; i += 5) {
+      const batch = localDocs.rows.slice(i, i + 5).map(r => r.id);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const result = await localDB.replicate.to(remote, { doc_ids: batch });
+          pushed += result.docs_written || 0;
+          break;
+        } catch (e) {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 2000));
+          } else {
+            // Try one by one
+            for (const docId of batch) {
+              try {
+                await localDB.replicate.to(remote, { doc_ids: [docId] });
+                pushed++;
+              } catch { pushErrors++; }
+            }
+          }
+        }
+      }
+      document.getElementById('loading-msg').textContent = `Pushing ${pushed}/${totalDocs} docs to cloud... (${pushErrors} errors)`;
+    }
 
     hideLoading();
-    alert(`Done!\n\nDeleted ${deleted} remote docs (${deleteErrors} errors skipped).\nPushed ${result.docs_written || pushed} docs to cloud.\n\nCloud is now an exact copy of this device.`);
+    alert(`Done!\n\nDeleted ${deleted} remote docs.\nPushed ${pushed}/${totalDocs} docs to cloud.\n${pushErrors > 0 ? pushErrors + ' failed (probably too large).' : 'No errors!'}\n\nCloud is now synced with this device.`);
   } catch (e) {
     hideLoading();
     alert('Error: ' + (e.message || JSON.stringify(e)));

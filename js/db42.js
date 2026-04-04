@@ -298,7 +298,7 @@ export async function pullOnce(remoteUrl, onProgress) {
 export function pushOnce(remoteUrl) {
   const remote = makeRemoteDB(remoteUrl);
   return new Promise((resolve, reject) => {
-    db.replicate.to(remote, { batch_size: 25 })
+    db.replicate.to(remote, { batch_size: 5 })
       .on('complete', (info) => resolve(info))
       .on('error', (err) => reject(err));
   });
