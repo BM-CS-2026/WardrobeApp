@@ -144,6 +144,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
 
-  <script type="module" src="js/app44.js"></script>
+  <script type="module">
+    const v = Date.now();
+    import('./js/app44.js?' + v).catch(() => import('./js/app43.js?' + v));
+  </script>
 </body>
 </html>
