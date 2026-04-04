@@ -7,6 +7,8 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
+window.APP_VERSION = '43a';
+console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
 let currentTab = 'wardrobe';
@@ -376,6 +378,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   await ensureBuiltInPalettes();
   setupTabs();
   renderCurrentTab();
+
+  // Show version
+  const verEl = document.getElementById('app-ver');
+  if (verEl) verEl.textContent = 'v' + (window.APP_VERSION || '?');
 
   // Start live sync for ongoing changes
   startSyncIfConfigured();
