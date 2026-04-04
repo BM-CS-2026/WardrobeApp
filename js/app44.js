@@ -491,6 +491,10 @@ app.showSyncSettings = () => {
         🖼️ Repair Broken Images
       </button>
 
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.findMissingImages()">
+        🔍 Find Missing Images
+      </button>
+
       <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.showDbStats()">
         📊 Show Database Details
       </button>
@@ -568,6 +572,8 @@ app.forcePushToCloud = async () => {
   if (!url) { alert('No sync URL configured.'); return; }
   closeSheet();
   showLoading('Resizing oversized images...');
+  // Stop sync during push to avoid conflicts
+  db.stopSync();
   // Auto-resize before push
   const localDB = new PouchDB('wardrobe_sync');
   const allImgs = await localDB.allDocs({startkey:'images:', endkey:'images:\ufff0', include_docs:true});
@@ -590,21 +596,34 @@ app.forcePushToCloud = async () => {
     hideLoading();
     alert('Push failed: ' + e.message);
   }
+  // Restart sync
+  try { db.setupSync(url, (evt) => { if (evt === 'change') { loadData().then(() => renderCurrentTab()); } }); } catch {}
 };
 
-// Resize image dataUrl to max 800px, JPEG quality 0.65 — for Cloudant 1MB limit
+// Resize image dataUrl progressively until under 800KB — for Cloudant 1MB limit
 function _resizeImageForSync(dataUrl) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const MAX = 800, Q = 0.65;
-      let w = img.width, h = img.height;
-      if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
-      else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      c.getContext('2d').drawImage(img, 0, 0, w, h);
-      resolve(c.toDataURL('image/jpeg', Q));
+      // Try progressively smaller sizes until under 800KB
+      const attempts = [
+        { max: 800, q: 0.65 },
+        { max: 600, q: 0.55 },
+        { max: 500, q: 0.45 },
+        { max: 400, q: 0.35 },
+      ];
+      let result = dataUrl;
+      for (const { max: MAX, q: Q } of attempts) {
+        let w = img.width, h = img.height;
+        if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
+        else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        result = c.toDataURL('image/jpeg', Q);
+        if (result.length < 800000) break;  // under 800KB, good enough
+      }
+      resolve(result);
     };
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
@@ -621,10 +640,37 @@ app.wipeRemoteAndPush = async () => {
   if (!confirm(`This will:\n\n1. DELETE everything in the cloud database\n2. Upload your local data (${localItems} items, ${localOutfits} outfits)\n\nThe cloud will be an exact copy of this device.\n\nContinue?`)) return;
 
   closeSheet();
-  showLoading('Wiping remote database...');
+  showLoading('Stopping sync...');
+
+  // CRITICAL: Stop live sync before wiping, otherwise tombstones replicate back and delete local data
+  db.stopSync();
 
   try {
-    // Step 1: Delete all remote docs
+    // Step 1: Snapshot ALL local docs BEFORE touching remote
+    document.getElementById('loading-msg').textContent = 'Reading local database...';
+    const localDB = new PouchDB('wardrobe_sync');
+    const allLocal = await localDB.allDocs({ include_docs: true });
+    const totalDocs = allLocal.rows.length;
+    console.log(`[WipePush] Snapshot: ${totalDocs} local docs`);
+
+    // Step 2: Resize oversized images locally first
+    let resizeCount = 0;
+    const imageDocs = allLocal.rows.filter(r => r.doc.dataUrl && r.doc.dataUrl.length > 500000);
+    for (let i = 0; i < imageDocs.length; i++) {
+      document.getElementById('loading-msg').textContent = `Resizing ${i + 1}/${imageDocs.length} large images...`;
+      try {
+        const doc = imageDocs[i].doc;
+        const newUrl = await _resizeImageForSync(doc.dataUrl);
+        if (newUrl.length < doc.dataUrl.length) {
+          doc.dataUrl = newUrl;
+          await localDB.put(doc);
+          resizeCount++;
+        }
+      } catch {}
+    }
+
+    // Step 3: Delete all remote docs
+    document.getElementById('loading-msg').textContent = 'Wiping remote database...';
     const remote = new PouchDB(url, { skip_setup: true });
     const allDocs = await remote.allDocs();
     const toDelete = allDocs.rows.map(row => ({
@@ -642,7 +688,6 @@ app.wipeRemoteAndPush = async () => {
           await remote.bulkDocs(batch);
           deleted += batch.length;
         } catch (e) {
-          // Try one by one for failed batch
           for (const doc of batch) {
             try { await remote.put(doc); deleted++; } catch { deleteErrors++; }
           }
@@ -651,65 +696,62 @@ app.wipeRemoteAndPush = async () => {
       }
     }
 
-    // Step 2: Read all local docs, resize oversized images, push one by one
-    const localDB = new PouchDB('wardrobe_sync');
-    const allLocal = await localDB.allDocs({ include_docs: true });
-    const totalDocs = allLocal.rows.length;
-    let pushed = 0, pushErrors = 0, resizeCount = 0, skipped = 0;
+    // Step 4: Re-read local docs (in case resize changed revs) and push one by one
+    const freshLocal = await localDB.allDocs({ include_docs: true });
+    const freshTotal = freshLocal.rows.length;
+    let pushed = 0, pushErrors = 0, skippedNames = [];
 
-    document.getElementById('loading-msg').textContent = `Preparing ${totalDocs} docs...`;
-
-    for (let i = 0; i < totalDocs; i++) {
-      const doc = allLocal.rows[i].doc;
-      const docSize = JSON.stringify(doc).length;
-
-      // Auto-resize oversized image docs
-      if (doc.dataUrl && doc.dataUrl.length > 500000) {
-        try {
-          const newUrl = await _resizeImageForSync(doc.dataUrl);
-          if (newUrl.length < doc.dataUrl.length) {
-            doc.dataUrl = newUrl;
-            await localDB.put(doc);
-            resizeCount++;
-          }
-        } catch {}
-      }
+    for (let i = 0; i < freshTotal; i++) {
+      const doc = freshLocal.rows[i].doc;
 
       // Skip docs still over 900KB after resize (Cloudant limit ~1MB)
       const finalSize = JSON.stringify(doc).length;
       if (finalSize > 900000) {
         pushErrors++;
-        document.getElementById('loading-msg').textContent = `Pushing ${pushed}/${totalDocs}... (${pushErrors} too large, skipped)`;
+        skippedNames.push(doc._id);
+        console.warn(`[WipePush] Skipped (${Math.round(finalSize/1024)}KB):`, doc._id);
         continue;
       }
 
-      // Push single doc with 15s timeout
+      // Push single doc with 20s timeout
       try {
         const { _rev, ...cleanDoc } = doc;
         await Promise.race([
           remote.put(cleanDoc).catch(async (e) => {
             if (e.status === 409) {
-              // Conflict — get remote rev and update
               const existing = await remote.get(doc._id);
               cleanDoc._rev = existing._rev;
               await remote.put(cleanDoc);
             } else { throw e; }
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 20000)),
         ]);
         pushed++;
       } catch (e) {
         pushErrors++;
+        skippedNames.push(doc._id);
+        console.warn(`[WipePush] Push error for ${doc._id}:`, e.message || e);
       }
 
-      if (i % 3 === 0 || i === totalDocs - 1) {
-        document.getElementById('loading-msg').textContent = `Pushing ${pushed}/${totalDocs} docs... (${pushErrors} errors)`;
+      if (i % 3 === 0 || i === freshTotal - 1) {
+        document.getElementById('loading-msg').textContent = `Pushing ${pushed}/${freshTotal} docs... (${pushErrors} errors)`;
       }
     }
 
+    // Step 5: Restart sync
+    document.getElementById('loading-msg').textContent = 'Restarting sync...';
+    db.setupSync(url, (evt) => {
+      if (evt === 'change') { loadData().then(() => renderCurrentTab()); }
+    });
+
     hideLoading();
-    alert(`Done!\n\n${resizeCount > 0 ? 'Resized ' + resizeCount + ' images.\n' : ''}Deleted ${deleted} remote docs.\nPushed ${pushed}/${totalDocs} docs.\n${pushErrors > 0 ? pushErrors + ' skipped (too large or timeout).' : 'No errors!'}`);
+    let msg = `Done!\n\n${resizeCount > 0 ? 'Resized ' + resizeCount + ' images.\n' : ''}Deleted ${deleted} remote docs.\nPushed ${pushed}/${freshTotal} docs.`;
+    if (pushErrors > 0) msg += `\n\n⚠️ ${pushErrors} skipped:\n${skippedNames.slice(0, 10).join('\n')}`;
+    else msg += '\nNo errors!';
+    alert(msg);
   } catch (e) {
+    // Restart sync even on error
+    try { db.setupSync(url, (evt) => { if (evt === 'change') { loadData().then(() => renderCurrentTab()); } }); } catch {}
     hideLoading();
     alert('Error: ' + (e.message || JSON.stringify(e)));
   }
@@ -766,6 +808,37 @@ app.repairImages = async () => {
   hideLoading();
   alert(`Repaired ${fixed} images.`);
   renderCurrentTab();
+};
+
+app.findMissingImages = async () => {
+  closeSheet();
+  showLoading('Checking images...');
+  const localDB = new PouchDB('wardrobe_sync');
+  const allItems = await localDB.allDocs({ startkey: 'items:', endkey: 'items:\ufff0', include_docs: true });
+  const allImages = await localDB.allDocs({ startkey: 'images:', endkey: 'images:\ufff0' });
+  const imageIds = new Set(allImages.rows.map(r => r.id.replace('images:', '')));
+
+  let missing = [], hasImage = 0;
+  for (const row of allItems.rows) {
+    const item = row.doc;
+    if (item.imageId) {
+      if (imageIds.has(item.imageId)) {
+        hasImage++;
+      } else {
+        missing.push(`${item.name?.substring(0, 40)} (${item.category})`);
+      }
+    } else {
+      missing.push(`${item.name?.substring(0, 40)} (${item.category}) — no imageId`);
+    }
+  }
+  hideLoading();
+  let msg = `Items with images: ${hasImage}\nItems missing images: ${missing.length}\nTotal image docs: ${allImages.rows.length}`;
+  if (missing.length > 0) {
+    msg += `\n\nMissing:\n${missing.slice(0, 30).join('\n')}`;
+    if (missing.length > 30) msg += `\n...and ${missing.length - 30} more`;
+  }
+  alert(msg);
+  console.log('[FindMissing]', { hasImage, missing, totalImages: allImages.rows.length });
 };
 
 app.showDbStats = async () => {
