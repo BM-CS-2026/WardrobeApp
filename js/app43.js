@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '44i';
+window.APP_VERSION = '44j';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -318,7 +318,7 @@ app.generateMissingImages = () => {
 };
 
 // ── Init ──
-document.addEventListener('DOMContentLoaded', async () => {
+async function appInit() {
   // Service worker disabled — using Cloudant sync instead
   // if ('serviceWorker' in navigator) {
   //   navigator.serviceWorker.register('./sw.js').catch(() => {});
@@ -391,7 +391,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
   document.getElementById('wishlist-file-hidden').onchange = function() { app.handleMyWishPhoto(this); };
   document.getElementById('wishlist-camera-hidden').onchange = function() { app.handleMyWishPhoto(this); };
-});
+}
+
+// Run init: if DOM already loaded (dynamic import), run now; otherwise wait
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', appInit);
+} else {
+  appInit();
+}
 
 // ── Sync ──
 
