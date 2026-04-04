@@ -144,12 +144,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
 
-  <script>
-    // Dynamic cache bust — ensures fresh JS on every load
-    const s = document.createElement('script');
-    s.type = 'module';
-    s.src = 'js/app42.js?v=' + Date.now();
-    document.body.appendChild(s);
-  </script>
+  <script type="module" src="js/app42.js?v=50"></script>
 </body>
 </html>
