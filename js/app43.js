@@ -3128,6 +3128,8 @@ function openColorPicker(color, onDone) {
 // ══════════════════════════════════════
 
 let showFavoritesOnly = false;
+let outfitSelectMode = false;
+let selectedOutfits = new Set();
 
 function renderOutfits() {
   const view = document.getElementById('view-outfits');
@@ -3140,9 +3142,17 @@ function renderOutfits() {
     <div class="view-header">
       <h1>Outfits</h1>
       <div style="display:flex;gap:8px">
+        ${displayed.length > 0 ? `<button class="btn-icon" onclick="app.toggleOutfitSelectMode()" title="Select" style="font-size:16px;${outfitSelectMode ? 'background:var(--accent);color:white' : ''}">${outfitSelectMode ? '✕' : '☑'}</button>` : ''}
         ${saved.some(o => o.favorite) ? `<button class="btn-icon" onclick="app.toggleFavFilter()" title="Favorites" style="font-size:16px;${showFavoritesOnly ? 'background:var(--accent);color:white' : ''}">❤️</button>` : ''}
       </div>
     </div>
+    ${outfitSelectMode ? `
+      <div style="display:flex;gap:8px;padding:8px 16px;background:var(--accent-light);align-items:center">
+        <span style="flex:1;font-size:13px;font-weight:600">${selectedOutfits.size} selected</span>
+        <button class="btn btn-sm" style="background:var(--accent);color:white" onclick="app.bulkFavoriteOutfits()" ${selectedOutfits.size === 0 ? 'disabled' : ''}>❤️ Like</button>
+        <button class="btn btn-sm btn-danger" onclick="app.bulkDeleteOutfits()" ${selectedOutfits.size === 0 ? 'disabled' : ''}>Delete</button>
+      </div>
+    ` : ''}
     ${displayed.length === 0 ? `
       <div class="empty-state">
         <div class="icon">${showFavoritesOnly ? '❤️' : '✨'}</div>
@@ -3168,13 +3178,67 @@ app.toggleFavFilter = () => {
   renderOutfits();
 };
 
+app.toggleOutfitSelectMode = () => {
+  outfitSelectMode = !outfitSelectMode;
+  selectedOutfits.clear();
+  renderOutfits();
+};
+
+app.toggleOutfitSelection = (id) => {
+  if (selectedOutfits.has(id)) {
+    selectedOutfits.delete(id);
+  } else {
+    selectedOutfits.add(id);
+  }
+  renderOutfits();
+  lazyLoadImages();
+};
+
+app.bulkFavoriteOutfits = async () => {
+  if (!selectedOutfits.size) return;
+  for (const id of selectedOutfits) {
+    const outfit = outfits.find(o => o.id === id);
+    if (outfit) {
+      outfit.favorite = true;
+      await db.putOutfit(outfit);
+    }
+  }
+  outfitSelectMode = false;
+  selectedOutfits.clear();
+  renderOutfits();
+};
+
+app.bulkDeleteOutfits = async () => {
+  if (!selectedOutfits.size) return;
+  if (!confirm(`Delete ${selectedOutfits.size} outfit${selectedOutfits.size > 1 ? 's' : ''}?`)) return;
+  for (const id of selectedOutfits) {
+    const outfit = outfits.find(o => o.id === id);
+    if (outfit) {
+      await db.delOutfit(id);
+      const idx = outfits.indexOf(outfit);
+      if (idx >= 0) outfits.splice(idx, 1);
+    }
+  }
+  outfitSelectMode = false;
+  selectedOutfits.clear();
+  renderOutfits();
+};
+
 function renderOutfitCard(outfit, num) {
   const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
   const isFav = !!outfit.favorite;
+  const isSelected = selectedOutfits.has(outfit.id);
+  const onclick = outfitSelectMode
+    ? `app.toggleOutfitSelection('${outfit.id}')`
+    : `app.showOutfitDetail('${outfit.id}')`;
   return `
-    <div class="outfit-card-wide">
-      <div class="outfit-number">Outfit #${num || ''}</div>
-      <div class="outfit-card-row" onclick="app.showOutfitDetail('${outfit.id}')">
+    <div class="outfit-card-wide" style="${isSelected ? 'border:2px solid var(--accent);background:var(--accent-light)' : ''}">
+      <div class="outfit-number" style="display:flex;align-items:center;gap:8px">
+        ${outfitSelectMode ? `<div class="wishlist-check ${isSelected ? 'checked' : ''}" style="flex-shrink:0">${isSelected ? '☑' : '☐'}</div>` : ''}
+        Outfit #${num || ''}
+        ${isFav ? ' ❤️' : ''}
+      </div>
+      <div class="outfit-card-row" onclick="${onclick}">
         <div class="outfit-card-ai">
           ${outfit.aiImageId
             ? `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;height:100%;object-fit:cover">`
@@ -3192,14 +3256,16 @@ function renderOutfitCard(outfit, num) {
           `).join('')}
         </div>
       </div>
-      <div class="score-badge">
-        <span class="pct ${scoreColor(outfit.overallScore)}">${Math.round(outfit.overallScore * 100)}%</span>
-        <span style="color:var(--text-secondary)">${oi.length} items</span>
-        <div style="display:flex;gap:8px;margin-left:auto" onclick="event.stopPropagation()">
-          <button onclick="app.toggleFavorite('${outfit.id}')" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px">${isFav ? '❤️' : '🤍'}</button>
-          <button onclick="app.quickDeleteOutfit('${outfit.id}')" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px">🗑️</button>
+      ${outfitSelectMode ? '' : `
+        <div class="score-badge">
+          <span class="pct ${scoreColor(outfit.overallScore)}">${Math.round(outfit.overallScore * 100)}%</span>
+          <span style="color:var(--text-secondary)">${oi.length} items</span>
+          <div style="display:flex;gap:8px;margin-left:auto" onclick="event.stopPropagation()">
+            <button onclick="app.toggleFavorite('${outfit.id}')" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px">${isFav ? '❤️' : '🤍'}</button>
+            <button onclick="app.quickDeleteOutfit('${outfit.id}')" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px">🗑️</button>
+          </div>
         </div>
-      </div>
+      `}
     </div>
   `;
 }
