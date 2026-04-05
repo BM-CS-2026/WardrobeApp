@@ -644,7 +644,7 @@ app.wipeRemoteAndPush = async () => {
               await remote.put(cleanDoc);
             } else { throw e; }
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 120000)),
         ]);
         pushed++;
       } catch (e) {

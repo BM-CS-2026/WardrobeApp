@@ -80,7 +80,12 @@ export async function del(store, id) {
 export async function saveImage(id, blob) {
   const _id = makeId('images', id);
   // Store as data URL string — no attachments, no Safari blob issues
-  const dataUrl = await blobToBase64(blob);
+  let dataUrl = await blobToBase64(blob);
+
+  // Resize to ~1MB for fast sync
+  if (dataUrl.length > 1000000) {
+    dataUrl = await _resizeForStorage(dataUrl);
+  }
 
   let rev;
   try {
@@ -93,6 +98,35 @@ export async function saveImage(id, blob) {
   const doc = { _id, type: 'images', dataUrl };
   if (rev) doc._rev = rev;
   return db.put(doc);
+}
+
+// Resize image progressively until ~1MB
+function _resizeForStorage(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const steps = [
+        { max: 1200, q: 0.8 },
+        { max: 1000, q: 0.7 },
+        { max: 800, q: 0.6 },
+        { max: 600, q: 0.5 },
+      ];
+      let result = dataUrl;
+      for (const { max, q } of steps) {
+        let w = img.width, h = img.height;
+        if (w > h) { if (w > max) { h = Math.round(h * max / w); w = max; } }
+        else { if (h > max) { w = Math.round(w * max / h); h = max; } }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        result = c.toDataURL('image/jpeg', q);
+        if (result.length < 1000000) break;
+      }
+      resolve(result);
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 export async function loadImage(id) {
