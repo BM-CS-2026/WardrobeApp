@@ -298,7 +298,7 @@ function makeRemoteDB(remoteUrl) {
 export function pullOnce(remoteUrl, onProgress) {
   const remote = makeRemoteDB(remoteUrl);
   return new Promise((resolve, reject) => {
-    db.replicate.from(remote, { batch_size: 25 })
+    db.replicate.from(remote, { batch_size: 5, timeout: 120000 })
       .on('change', (info) => { if (onProgress) onProgress(info); })
       .on('complete', (info) => resolve(info))
       .on('error', (err) => reject(err));
@@ -308,7 +308,7 @@ export function pullOnce(remoteUrl, onProgress) {
 export function pushOnce(remoteUrl) {
   const remote = makeRemoteDB(remoteUrl);
   return new Promise((resolve, reject) => {
-    db.replicate.to(remote, { batch_size: 25 })
+    db.replicate.to(remote, { batch_size: 5, timeout: 120000 })
       .on('complete', (info) => resolve(info))
       .on('error', (err) => reject(err));
   });
