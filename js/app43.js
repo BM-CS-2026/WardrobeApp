@@ -423,10 +423,11 @@ function startSyncIfConfigured() {
   setSyncDot('active');
 }
 
-app.showSyncSettings = () => {
+app.showSyncSettings = async () => {
   const currentUrl = db.getSyncUrl();
   const itemCount = items.length;
   const outfitCount = outfits.filter(o => o.isSaved).length;
+  const savedApiKey = await db.getApiKey() || '';
   openSheet(`
     <h2>Settings & Troubleshooting</h2>
 
@@ -475,10 +476,6 @@ app.showSyncSettings = () => {
         🔥 Wipe Remote & Push (replace cloud with local)
       </button>
 
-      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.checkRemoteDb()">
-        📡 Check Remote Database
-      </button>
-
       <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.clearCacheReload()">
         🧹 Clear Cache & Reload App
       </button>
@@ -487,21 +484,19 @@ app.showSyncSettings = () => {
         💣 Nuke All Caches & Reload
       </button>
 
-      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.repairImages()">
-        🖼️ Repair Broken Images
+      <button class="btn btn-sm btn-danger" style="margin-bottom:6px" onclick="app.removeAllItems()">
+        🗑️ Remove All Items
       </button>
+    </div>
 
-      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.findMissingImages()">
-        🔍 Find Missing Images
-      </button>
-
-      <button class="btn btn-sm btn-primary" style="margin-bottom:6px" onclick="app.restoreImagesFromFiles()">
-        📂 Restore Missing Images
-      </button>
-
-      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.showDbStats()">
-        📊 Show Database Details
-      </button>
+    <!-- API Key -->
+    <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:8px">OpenAI API Key</div>
+      <div class="form-group" style="margin-bottom:4px">
+        <input id="settings-api-key" type="password" placeholder="sk-..." value="${savedApiKey}" style="font-size:12px">
+      </div>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Required for AI detection & outfit images. Stored locally only.</p>
+      <button class="btn btn-primary btn-sm" onclick="app.saveApiKeyFromSettings()">Save Key</button>
     </div>
 
     <div id="troubleshoot-log" style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px;font-size:11px;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow-y:auto;display:none"></div>
@@ -575,64 +570,18 @@ app.forcePushToCloud = async () => {
   const url = db.getSyncUrl();
   if (!url) { alert('No sync URL configured.'); return; }
   closeSheet();
-  showLoading('Resizing oversized images...');
-  // Stop sync during push to avoid conflicts
+  showLoading('Pushing to cloud...');
   db.stopSync();
-  // Auto-resize before push
-  const localDB = new PouchDB('wardrobe_sync');
-  const allImgs = await localDB.allDocs({startkey:'images:', endkey:'images:\ufff0', include_docs:true});
-  let resized = 0;
-  const oversized = allImgs.rows.filter(r => r.doc.dataUrl && r.doc.dataUrl.length > 500000);
-  for (let i = 0; i < oversized.length; i++) {
-    document.getElementById('loading-msg').textContent = `Resizing ${i + 1}/${oversized.length} large images...`;
-    try {
-      const doc = oversized[i].doc;
-      const newUrl = await _resizeImageForSync(doc.dataUrl);
-      if (newUrl.length < doc.dataUrl.length) { doc.dataUrl = newUrl; await localDB.put(doc); resized++; }
-    } catch {}
-  }
-  document.getElementById('loading-msg').textContent = `Pushing to cloud...`;
   try {
     const result = await db.pushOnce(url);
     hideLoading();
-    alert(`Push complete!\n${resized > 0 ? 'Resized ' + resized + ' images first.\n' : ''}${result.docs_written} docs uploaded.`);
+    alert(`Push complete! ${result.docs_written} docs uploaded.`);
   } catch (e) {
     hideLoading();
     alert('Push failed: ' + e.message);
   }
-  // Restart sync
   try { db.setupSync(url, (evt) => { if (evt === 'change') { loadData().then(() => renderCurrentTab()); } }); } catch {}
 };
-
-// Resize image dataUrl progressively until under 800KB — for Cloudant 1MB limit
-function _resizeImageForSync(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      // Try progressively smaller sizes until under 800KB
-      const attempts = [
-        { max: 800, q: 0.65 },
-        { max: 600, q: 0.55 },
-        { max: 500, q: 0.45 },
-        { max: 400, q: 0.35 },
-      ];
-      let result = dataUrl;
-      for (const { max: MAX, q: Q } of attempts) {
-        let w = img.width, h = img.height;
-        if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
-        else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        result = c.toDataURL('image/jpeg', Q);
-        if (result.length < 800000) break;  // under 800KB, good enough
-      }
-      resolve(result);
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
-}
 
 app.wipeRemoteAndPush = async () => {
   const url = db.getSyncUrl();
@@ -650,30 +599,7 @@ app.wipeRemoteAndPush = async () => {
   db.stopSync();
 
   try {
-    // Step 1: Snapshot ALL local docs BEFORE touching remote
-    document.getElementById('loading-msg').textContent = 'Reading local database...';
-    const localDB = new PouchDB('wardrobe_sync');
-    const allLocal = await localDB.allDocs({ include_docs: true });
-    const totalDocs = allLocal.rows.length;
-    console.log(`[WipePush] Snapshot: ${totalDocs} local docs`);
-
-    // Step 2: Resize oversized images locally first
-    let resizeCount = 0;
-    const imageDocs = allLocal.rows.filter(r => r.doc.dataUrl && r.doc.dataUrl.length > 500000);
-    for (let i = 0; i < imageDocs.length; i++) {
-      document.getElementById('loading-msg').textContent = `Resizing ${i + 1}/${imageDocs.length} large images...`;
-      try {
-        const doc = imageDocs[i].doc;
-        const newUrl = await _resizeImageForSync(doc.dataUrl);
-        if (newUrl.length < doc.dataUrl.length) {
-          doc.dataUrl = newUrl;
-          await localDB.put(doc);
-          resizeCount++;
-        }
-      } catch {}
-    }
-
-    // Step 3: Delete all remote docs
+    // Step 1: Delete all remote docs
     document.getElementById('loading-msg').textContent = 'Wiping remote database...';
     const remote = new PouchDB(url, { skip_setup: true });
     const allDocs = await remote.allDocs();
@@ -700,24 +626,14 @@ app.wipeRemoteAndPush = async () => {
       }
     }
 
-    // Step 4: Re-read local docs (in case resize changed revs) and push one by one
+    // Step 2: Push all local docs
+    const localDB = new PouchDB('wardrobe_sync');
     const freshLocal = await localDB.allDocs({ include_docs: true });
     const freshTotal = freshLocal.rows.length;
-    let pushed = 0, pushErrors = 0, skippedNames = [];
+    let pushed = 0, pushErrors = 0;
 
     for (let i = 0; i < freshTotal; i++) {
       const doc = freshLocal.rows[i].doc;
-
-      // Skip docs still over 900KB after resize (Cloudant limit ~1MB)
-      const finalSize = JSON.stringify(doc).length;
-      if (finalSize > 900000) {
-        pushErrors++;
-        skippedNames.push(doc._id);
-        console.warn(`[WipePush] Skipped (${Math.round(finalSize/1024)}KB):`, doc._id);
-        continue;
-      }
-
-      // Push single doc with 20s timeout
       try {
         const { _rev, ...cleanDoc } = doc;
         await Promise.race([
@@ -728,12 +644,11 @@ app.wipeRemoteAndPush = async () => {
               await remote.put(cleanDoc);
             } else { throw e; }
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 20000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000)),
         ]);
         pushed++;
       } catch (e) {
         pushErrors++;
-        skippedNames.push(doc._id);
         console.warn(`[WipePush] Push error for ${doc._id}:`, e.message || e);
       }
 
@@ -742,15 +657,15 @@ app.wipeRemoteAndPush = async () => {
       }
     }
 
-    // Step 5: Restart sync
+    // Step 3: Restart sync
     document.getElementById('loading-msg').textContent = 'Restarting sync...';
     db.setupSync(url, (evt) => {
       if (evt === 'change') { loadData().then(() => renderCurrentTab()); }
     });
 
     hideLoading();
-    let msg = `Done!\n\n${resizeCount > 0 ? 'Resized ' + resizeCount + ' images.\n' : ''}Deleted ${deleted} remote docs.\nPushed ${pushed}/${freshTotal} docs.`;
-    if (pushErrors > 0) msg += `\n\n⚠️ ${pushErrors} skipped:\n${skippedNames.slice(0, 10).join('\n')}`;
+    let msg = `Done!\n\nDeleted ${deleted} remote docs.\nPushed ${pushed}/${freshTotal} docs.`;
+    if (pushErrors > 0) msg += `\n\n⚠️ ${pushErrors} failed.`;
     else msg += '\nNo errors!';
     alert(msg);
   } catch (e) {
@@ -758,21 +673,6 @@ app.wipeRemoteAndPush = async () => {
     try { db.setupSync(url, (evt) => { if (evt === 'change') { loadData().then(() => renderCurrentTab()); } }); } catch {}
     hideLoading();
     alert('Error: ' + (e.message || JSON.stringify(e)));
-  }
-};
-
-app.checkRemoteDb = async () => {
-  const url = db.getSyncUrl();
-  if (!url) { alert('No sync URL configured.'); return; }
-  tsLog('Checking remote...');
-  try {
-    const info = await db.checkRemote(url);
-    tsLog('Remote: ' + info.doc_count + ' docs');
-    tsLog('Items: ' + info.items + ', Outfits: ' + info.outfits + ', Images: ' + info.images);
-    alert(`Remote DB:\n${info.doc_count} total docs\n${info.items} items\n${info.outfits} outfits\n${info.images} images`);
-  } catch (e) {
-    tsLog('ERROR: ' + e.message);
-    alert('Check failed: ' + e.message);
   }
 };
 
@@ -802,153 +702,44 @@ app.nukeCacheReload = async () => {
   location.reload(true);
 };
 
-app.repairImages = async () => {
-  tsLog('Repairing images...');
-  closeSheet();
-  showLoading('Repairing images...');
-  const fixed = await db.repairImages((done, total) => {
-    document.getElementById('loading-msg').textContent = `Repairing... ${done}/${total}`;
-  });
-  hideLoading();
-  alert(`Repaired ${fixed} images.`);
-  renderCurrentTab();
+app.saveApiKeyFromSettings = async () => {
+  const key = document.getElementById('settings-api-key')?.value?.trim();
+  if (key) {
+    await db.saveApiKey(key);
+    alert('API key saved!');
+  } else {
+    alert('Please enter a key.');
+  }
 };
 
-app.findMissingImages = async () => {
+app.removeAllItems = async () => {
+  const total = items.length;
+  if (!confirm(`⚠️ WARNING ⚠️\n\nThis will permanently delete ALL ${total} items, their images, all outfits, and all palettes.\n\nThis cannot be undone!\n\nAre you sure?`)) return;
+  if (!confirm(`REALLY delete everything? Type count: ${total} items, ${outfits.length} outfits will be gone forever.`)) return;
+
   closeSheet();
-  showLoading('Checking images...');
-  const localDB = new PouchDB('wardrobe_sync');
-  const allItems = await localDB.allDocs({ startkey: 'items:', endkey: 'items:\ufff0', include_docs: true });
-  const allImages = await localDB.allDocs({ startkey: 'images:', endkey: 'images:\ufff0' });
-  const imageIds = new Set(allImages.rows.map(r => r.id.replace('images:', '')));
-
-  let missing = [], hasImage = 0;
-  for (const row of allItems.rows) {
-    const item = row.doc;
-    if (item.imageId) {
-      if (imageIds.has(item.imageId)) {
-        hasImage++;
-      } else {
-        missing.push(`${item.name?.substring(0, 40)} (${item.category})`);
-      }
-    } else {
-      missing.push(`${item.name?.substring(0, 40)} (${item.category}) — no imageId`);
-    }
-  }
-  hideLoading();
-  let msg = `Items with images: ${hasImage}\nItems missing images: ${missing.length}\nTotal image docs: ${allImages.rows.length}`;
-  if (missing.length > 0) {
-    msg += `\n\nMissing:\n${missing.slice(0, 30).join('\n')}`;
-    if (missing.length > 30) msg += `\n...and ${missing.length - 30} more`;
-  }
-  alert(msg);
-  console.log('[FindMissing]', { hasImage, missing, totalImages: allImages.rows.length });
-};
-
-app.restoreImagesFromFiles = async () => {
-  closeSheet();
-  showLoading('Fetching upload files...');
-
-  const uploadFiles = [
-    'upload-items.html',
-    'upload-shoes.html',
-    'upload-clothing-1.html',
-    'upload-clothing-2.html',
-    'upload-clothing-3.html',
-    'upload-clothing-4.html',
-    'upload-clothing-5.html',
-    'upload-clothing-6.html',
-  ];
+  showLoading('Removing all items...');
 
   const localDB = new PouchDB('wardrobe_sync');
+  const allDocs = await localDB.allDocs({ include_docs: true });
+  let deleted = 0;
 
-  // First, find which images are missing
-  document.getElementById('loading-msg').textContent = 'Checking which images are missing...';
-  const allItems = await localDB.allDocs({ startkey: 'items:', endkey: 'items:\ufff0', include_docs: true });
-  const allImages = await localDB.allDocs({ startkey: 'images:', endkey: 'images:\ufff0' });
-  const existingImageIds = new Set(allImages.rows.map(r => r.id.replace('images:', '')));
-  const missingImageIds = new Set();
-  for (const row of allItems.rows) {
-    if (row.doc.imageId && !existingImageIds.has(row.doc.imageId)) {
-      missingImageIds.add(row.doc.imageId);
-    }
-  }
-
-  if (missingImageIds.size === 0) {
-    hideLoading();
-    alert('All images are present! Nothing to restore.');
-    return;
-  }
-
-  let restored = 0, errors = 0;
-
-  for (const fileName of uploadFiles) {
-    document.getElementById('loading-msg').textContent = `Fetching ${fileName}...`;
-    let text;
+  for (const row of allDocs.rows) {
+    // Keep settings docs (sync URL, API key, etc.)
+    if (row.id.startsWith('settings:')) continue;
     try {
-      const resp = await fetch(fileName + '?t=' + Date.now());
-      if (!resp.ok) { console.warn(`Could not fetch ${fileName}`); continue; }
-      text = await resp.text();
-    } catch { continue; }
-
-    const match = text.match(/const ITEMS = (\[[\s\S]*?\]);\s*\n/);
-    if (!match) continue;
-    let fileItems;
-    try { fileItems = JSON.parse(match[1]); } catch { continue; }
-
-    for (let i = 0; i < fileItems.length; i++) {
-      const item = fileItems[i];
-      if (!item.imageId || !item.dataUrl) continue;
-      if (!missingImageIds.has(item.imageId)) continue;  // not missing, skip
-
-      const docId = 'images:' + item.imageId;
-
-      // Resize before saving
-      let dataUrl = item.dataUrl;
-      try { dataUrl = await _resizeImageForSync(dataUrl); } catch {}
-
-      // Force-save: handle both new docs and deleted tombstones
-      const doc = { _id: docId, type: 'images', dataUrl };
-      try {
-        await localDB.put(doc);
-        restored++;
-        missingImageIds.delete(item.imageId);
-      } catch (e) {
-        if (e.status === 409) {
-          try {
-            const changes = await localDB.changes({ doc_ids: [docId], limit: 1 });
-            if (changes.results.length > 0) {
-              doc._rev = changes.results[0].changes[0].rev;
-              await localDB.put(doc);
-              restored++;
-              missingImageIds.delete(item.imageId);
-            } else { errors++; }
-          } catch { errors++; }
-        } else { errors++; }
-      }
-
-      document.getElementById('loading-msg').textContent = `Restoring... ${restored} recovered (${missingImageIds.size} remaining)`;
+      await localDB.remove(row.doc._id, row.doc._rev);
+      deleted++;
+    } catch {}
+    if (deleted % 10 === 0) {
+      document.getElementById('loading-msg').textContent = `Deleting... ${deleted}/${allDocs.rows.length}`;
     }
   }
 
   await loadData();
   hideLoading();
   renderCurrentTab();
-  alert(`Done!\n\nRestored: ${restored} images\nStill missing: ${missingImageIds.size}\nErrors: ${errors}`);
-};
-
-app.showDbStats = async () => {
-  const allDocs = await db.getAllItems();
-  const allOutfits = await db.getAllOutfits();
-  const allPalettes = await db.getAllPalettes();
-  const cats = {};
-  for (const item of allDocs) {
-    cats[item.category] = (cats[item.category] || 0) + 1;
-  }
-  const catLines = Object.entries(cats).map(([k, v]) => `  ${k}: ${v}`).join('\n');
-  const msg = `Items: ${allDocs.length}\n${catLines}\nOutfits: ${allOutfits.length}\nPalettes: ${allPalettes.length}\nSync URL: ${db.getSyncUrl() ? 'Yes' : 'No'}`;
-  tsLog(msg);
-  alert(msg);
+  alert(`Deleted ${deleted} docs. App is now empty.`);
 };
 
 async function loadData() {
@@ -1445,8 +1236,6 @@ app.customSwatchColor = (itemId, which) => {
 let newlyAddedItems = [];
 
 app.showAddFlow = async () => {
-  const savedKey = await db.getApiKey() || '';
-  const hasKey = !!savedKey;
   openSheet(`
     <h2>Add Items</h2>
     <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
@@ -1468,13 +1257,6 @@ app.showAddFlow = async () => {
       </div>
       <div class="chevron">›</div>
     </label>
-
-    <div class="divider"></div>
-    <div class="form-group">
-      <label>OpenAI API Key ${hasKey ? '(saved)' : ''}</label>
-      <input id="api-key-input" type="password" placeholder="sk-..." value="${savedKey}" onchange="app.saveApiKey(this.value)">
-      <p style="font-size:11px;color:var(--text-secondary);margin-top:4px">Required for AI detection. Stored locally on your device only.</p>
-    </div>
   `);
 };
 

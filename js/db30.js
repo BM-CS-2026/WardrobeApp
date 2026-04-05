@@ -80,12 +80,7 @@ export async function del(store, id) {
 export async function saveImage(id, blob) {
   const _id = makeId('images', id);
   // Store as data URL string — no attachments, no Safari blob issues
-  let dataUrl = await blobToBase64(blob);
-
-  // Always resize to keep images under Cloudant's 1MB limit
-  if (dataUrl.length > 400000) {
-    dataUrl = await _resizeForStorage(dataUrl);
-  }
+  const dataUrl = await blobToBase64(blob);
 
   let rev;
   try {
@@ -98,35 +93,6 @@ export async function saveImage(id, blob) {
   const doc = { _id, type: 'images', dataUrl };
   if (rev) doc._rev = rev;
   return db.put(doc);
-}
-
-// Resize image progressively until under 800KB
-function _resizeForStorage(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const steps = [
-        { max: 800, q: 0.65 },
-        { max: 600, q: 0.55 },
-        { max: 500, q: 0.45 },
-        { max: 400, q: 0.35 },
-      ];
-      let result = dataUrl;
-      for (const { max, q } of steps) {
-        let w = img.width, h = img.height;
-        if (w > h) { if (w > max) { h = Math.round(h * max / w); w = max; } }
-        else { if (h > max) { w = Math.round(w * max / h); h = max; } }
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        result = c.toDataURL('image/jpeg', q);
-        if (result.length < 800000) break;
-      }
-      resolve(result);
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
 }
 
 export async function loadImage(id) {
