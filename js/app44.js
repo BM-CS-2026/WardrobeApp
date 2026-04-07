@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '45a';
+window.APP_VERSION = '45b';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -389,6 +389,9 @@ async function appInit() {
   // Daily auto-backup push
   scheduleDailyBackup();
 
+  // Auto-fix colors if many items have gray dominant (one-time)
+  autoFixColorsIfNeeded();
+
   // Wire up persistent file inputs
   document.getElementById('file-picker-hidden').onchange = function() { app.handlePhotos(this); };
   document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
@@ -411,6 +414,52 @@ function setSyncDot(state) {
   const colors = { paused: '#4CAF50', active: '#2196F3', error: '#f44336', off: '#999' };
   dot.style.background = colors[state] || colors.off;
   dot.title = state === 'paused' ? 'Synced' : state === 'active' ? 'Syncing...' : state === 'error' ? 'Sync error' : 'Sync not configured';
+}
+
+async function autoFixColorsIfNeeded() {
+  const COLOR_FIX_KEY = 'colors_fixed_v45';
+  if (localStorage.getItem(COLOR_FIX_KEY)) return; // already done
+  if (items.length === 0) return;
+
+  // Check if many items have gray/desaturated dominant colors
+  let grayCount = 0;
+  for (const item of items) {
+    const cp = item.colorProfile;
+    if (cp && cp.dominantColor && cp.dominantColor.saturation < 0.1) grayCount++;
+  }
+  const grayPct = grayCount / items.length;
+  if (grayPct < 0.3) {
+    localStorage.setItem(COLOR_FIX_KEY, '1');
+    return; // colors look fine
+  }
+
+  console.log(`[AutoFix] ${grayCount}/${items.length} items have gray colors (${Math.round(grayPct * 100)}%). Re-analyzing...`);
+
+  // Run color re-analysis in background
+  setTimeout(async () => {
+    const { extractColorProfile } = await import('./color-engine.js?v=20');
+    let fixed = 0;
+    for (const item of items) {
+      if (!item.imageId) continue;
+      try {
+        const imgData = await db.loadImage(item.imageId);
+        if (!imgData) continue;
+        const blob = (typeof imgData === 'string') ? await (await fetch(imgData)).blob() : imgData;
+        const profile = await extractColorProfile(blob);
+        if (profile) {
+          item.colorProfile = profile;
+          await db.putItem(item);
+          fixed++;
+        }
+      } catch {}
+    }
+    console.log(`[AutoFix] Re-analyzed colors for ${fixed} items`);
+    localStorage.setItem(COLOR_FIX_KEY, '1');
+    if (fixed > 0) {
+      await loadData();
+      renderCurrentTab();
+    }
+  }, 5000); // start 5s after app init
 }
 
 function scheduleDailyBackup() {
@@ -2484,7 +2533,7 @@ app.showItemDetail = async (id) => {
         <span style="font-size:12px;color:var(--text-secondary)">${currentIdx + 1} / ${sameCategory.length}</span>
         <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${nextId ? 'visible' : 'hidden'}" onclick="app.showItemDetail('${nextId}')">Next ›</button>
       </div>
-      ${imgSrc ? `<img src="${imgSrc}" class="detail-image zoomable-img" onclick="app.zoomImage(this.src)">` : ''}
+      ${imgSrc ? `<img src="${imgSrc}" class="detail-image zoomable-img" onclick="app.zoomImage(event)">` : ''}
 
       <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:16px">
         <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Description (edit to correct)</div>
@@ -3523,7 +3572,7 @@ app.showOutfitDetail = async (id) => {
         <div class="outfit-detail-left">
           <div class="ai-image-wishlist-wrap" onclick="app.showImageWishPicker('${outfit.id}')">
             ${outfit.aiImageId ?
-              `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img zoomable-img" onclick="app.zoomImage(this.src)" style="width:100%;border-radius:var(--radius);background:var(--bg);display:block">` :
+              `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img zoomable-img" onclick="app.zoomImage(event)" style="width:100%;border-radius:var(--radius);background:var(--bg);display:block">` :
               `<div style="width:100%;aspect-ratio:3/4;background:var(--bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px">AI image generating...</div>`}
             <div class="ai-image-hint">Tap image to add items to Wish List</div>
           </div>
@@ -4803,10 +4852,14 @@ app.closeSheet = closeSheet;
 
 // Detail view (full screen overlay)
 // Tap-to-zoom on detail images
-app.zoomImage = (src) => {
+app.zoomImage = (event) => {
+  const img = event.target;
+  if (!img.src) return;
   const overlay = document.createElement('div');
   overlay.className = 'zoom-overlay';
-  overlay.innerHTML = `<img src="${src}">`;
+  const zoomImg = document.createElement('img');
+  zoomImg.src = img.src;
+  overlay.appendChild(zoomImg);
   overlay.onclick = () => overlay.remove();
   document.body.appendChild(overlay);
 };
