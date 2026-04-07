@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '45b';
+window.APP_VERSION = '45c';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -392,6 +392,9 @@ async function appInit() {
   // Auto-fix colors if many items have gray dominant (one-time)
   autoFixColorsIfNeeded();
 
+  // One-time shoe description update
+  fixShoeDescriptions();
+
   // Wire up persistent file inputs
   document.getElementById('file-picker-hidden').onchange = function() { app.handlePhotos(this); };
   document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
@@ -416,8 +419,63 @@ function setSyncDot(state) {
   dot.title = state === 'paused' ? 'Synced' : state === 'active' ? 'Syncing...' : state === 'error' ? 'Sync error' : 'Sync not configured';
 }
 
+async function fixShoeDescriptions() {
+  const FIX_KEY = 'shoes_desc_fixed_v45b';
+  if (localStorage.getItem(FIX_KEY)) return;
+
+  const fixes = {
+    'Beige cream canvas low-top sneakers, Converse Chuck Taylor style, white rubber toe cap, black laces, white sole with black stripe': 'Beige canvas low-top sneakers with black laces, white rubber toe cap and white sole with black stripe',
+    'White leather low-top sneakers, clean minimal design, white laces, white rubber sole, lace-up, slight wear': 'White leather high-top sneakers with white laces, clean minimalist design, slightly worn',
+    'Dark brown leather lace-up derby dress shoes with perforated detailing on toe cap, brown laces, flat sole': 'Medium brown leather derby dress shoes with micro-perforated texture on toe, brown laces, rounded toe',
+    'Dark brown polished leather Chelsea boots, elastic side panels, pull tabs at back, round toe, Blundstone style': 'Dark brown leather Chelsea boots with elastic side panels and black pull tabs, rounded toe, ankle height',
+    'Navy blue suede low-top sneakers, minimal design, navy laces, white rubber sole, lace-up': 'Navy blue suede high-top sneakers with navy laces and white rubber sole, minimalist design',
+    'Navy blue suede high-top sneakers, minimal design, navy laces, white rubber sole, lace-up, ankle height': 'Navy blue suede high-top sneakers with navy laces and white rubber sole, front view',
+    'Black polished leather Chelsea boots, elastic side panels, pull tabs at back, round toe, sleek silhouette': 'Black polished leather Chelsea boots with elastic side panels and pull tabs, smooth rounded toe, ankle height',
+    'Beige cream canvas low-top sneakers, Converse Chuck Taylor style, white rubber toe cap, black laces, top-down view': 'Beige canvas low-top sneakers with thick black laces, white rubber toe cap, white sole with black trim',
+    'White leather low-top sneakers, clean minimal design, white laces, white rubber sole, top-down view, slight wear': 'White leather high-top sneakers with white laces and rounded rubber toe cap',
+    'Grey suede penny loafers, slip-on, classic penny strap across vamp, leather sole, round toe': 'Medium gray suede penny loafers with classic saddle strap, slip-on design, rounded toe',
+    'Dark charcoal grey suede and mesh athletic running shoes, grey laces, white midsole, black outsole, lace-up': 'Dark charcoal gray athletic running shoes with mesh and suede upper, gray laces, white midsole with black outsole',
+    'Black pebbled leather slip-on casual shoes with velcro strap closure, round toe, rubber sole, comfort style': 'Black pebbled leather slip-on casual shoes with wide strap closure across top, rounded toe',
+    'Black polished leather horsebit loafers, slip-on, silver metal horse-bit hardware across vamp, round toe, dress style': 'Black polished leather loafers with silver metal horsebit buckle across vamp, slip-on, rounded toe',
+    'Black leather cap-toe oxford dress shoes, lace-up, polished finish, black laces, formal style': 'Black leather cap-toe derby shoes with black laces, structured toe, formal style',
+    'Black leather tassel loafers, slip-on, leather tassels on vamp, round toe, dress style, slight wear': 'Dark navy leather tassel loafers with leather tassels on vamp, slip-on, rounded toe',
+    'Dark brown leather lace-up derby casual shoes with paneled stitching, brown laces, rubber sole, round toe': 'Dark brown leather lace-up casual shoes with brown laces, paneled construction, rounded toe',
+    'Dark brown polished leather double monk strap shoes, two buckle closures, cap toe, dress style': 'Dark brown polished leather double monk strap shoes with two buckle closures, cap toe',
+    'Taupe beige suede double monk strap shoes, two small buckle closures, round toe, rubber sole, casual style': 'Taupe suede monk strap shoes with single metal buckle closure, rounded toe, casual style',
+    'Light grey suede moccasin driving loafers, slip-on, hand-stitched vamp, rubber nub sole, casual style': 'Light gray suede moccasin-style slippers with hand-stitched seams around toe, slip-on design',
+    'Tan cognac smooth leather penny loafers, slip-on, classic penny strap, round toe, leather sole, casual dress style': 'Tan cognac leather penny loafers, slip-on design, smooth leather upper, rounded toe',
+    'Dark navy blue suede moccasin driving loafers, slip-on, hand-stitched vamp, rubber nub sole, casual style': 'Dark navy suede moccasin-style loafers with hand-stitched seams around toe, slip-on design',
+    'Tan brown leather woven huarache loafers, slip-on, interlaced leather weave on vamp and sides, round toe, casual summer style': 'Tan leather woven huarache-style loafers with interlaced leather strips on vamp, slip-on, rounded toe',
+    'Dark navy blue suede penny loafers, slip-on, classic penny strap across vamp, round toe, leather sole, dress casual style': 'Dark navy blue suede penny loafers with classic saddle strap, slip-on design, rounded toe',
+    'Burgundy maroon and olive green colorblock suede low-top sneakers, Vans style, white laces, off-white rubber sole, lace-up': 'Burgundy olive and navy colorblock retro low-top sneakers with white laces and light gray rubber sole',
+    'Black suede and canvas low-top sneakers, Puma style, white logo stripe on side, black laces, white rubber sole, lace-up': 'Black suede low-top sneakers with white logo stripe on side, black laces, white rubber sole',
+  };
+
+  let updated = 0;
+  for (const item of items) {
+    if (item.category !== 'shoes') continue;
+    const newName = fixes[item.name];
+    if (newName) {
+      item.name = newName;
+      const color = colorFromDescription(newName);
+      if (color) {
+        item.colorProfile = { dominantColor: color, secondaryColors: [], averageColor: color };
+      }
+      await db.putItem(item);
+      updated++;
+    }
+  }
+
+  localStorage.setItem(FIX_KEY, '1');
+  if (updated > 0) {
+    console.log(`[Fix] Updated ${updated} shoe descriptions`);
+    await loadData();
+    renderCurrentTab();
+  }
+}
+
 async function autoFixColorsIfNeeded() {
-  const COLOR_FIX_KEY = 'colors_fixed_v45';
+  const COLOR_FIX_KEY = 'colors_fixed_v45c';
   if (localStorage.getItem(COLOR_FIX_KEY)) return; // already done
   if (items.length === 0) return;
 
@@ -433,33 +491,26 @@ async function autoFixColorsIfNeeded() {
     return; // colors look fine
   }
 
-  console.log(`[AutoFix] ${grayCount}/${items.length} items have gray colors (${Math.round(grayPct * 100)}%). Re-analyzing...`);
+  console.log(`[AutoFix] ${grayCount}/${items.length} items have gray colors (${Math.round(grayPct * 100)}%). Fixing from descriptions...`);
 
-  // Run color re-analysis in background
+  // Fix colors from descriptions in background
   setTimeout(async () => {
-    const { extractColorProfile } = await import('./color-engine.js?v=20');
     let fixed = 0;
     for (const item of items) {
-      if (!item.imageId) continue;
-      try {
-        const imgData = await db.loadImage(item.imageId);
-        if (!imgData) continue;
-        const blob = (typeof imgData === 'string') ? await (await fetch(imgData)).blob() : imgData;
-        const profile = await extractColorProfile(blob);
-        if (profile) {
-          item.colorProfile = profile;
-          await db.putItem(item);
-          fixed++;
-        }
-      } catch {}
+      const color = colorFromDescription(item.name);
+      if (color) {
+        item.colorProfile = { dominantColor: color, secondaryColors: [], averageColor: color };
+        await db.putItem(item);
+        fixed++;
+      }
     }
-    console.log(`[AutoFix] Re-analyzed colors for ${fixed} items`);
+    console.log(`[AutoFix] Fixed colors for ${fixed} items from descriptions`);
     localStorage.setItem(COLOR_FIX_KEY, '1');
     if (fixed > 0) {
       await loadData();
       renderCurrentTab();
     }
-  }, 5000); // start 5s after app init
+  }, 3000);
 }
 
 function scheduleDailyBackup() {
@@ -799,35 +850,132 @@ app.saveApiKeyFromSettings = async () => {
   }
 };
 
+// Color name to HSL mapping for description-based color extraction
+const COLOR_MAP = {
+  'navy': { hue: 220, saturation: 0.65, lightness: 0.2 },
+  'dark navy': { hue: 220, saturation: 0.7, lightness: 0.15 },
+  'deep navy': { hue: 220, saturation: 0.7, lightness: 0.13 },
+  'indigo': { hue: 230, saturation: 0.55, lightness: 0.3 },
+  'dark indigo': { hue: 230, saturation: 0.6, lightness: 0.2 },
+  'medium indigo': { hue: 225, saturation: 0.5, lightness: 0.35 },
+  'denim': { hue: 215, saturation: 0.45, lightness: 0.4 },
+  'chambray': { hue: 210, saturation: 0.4, lightness: 0.55 },
+  'cobalt': { hue: 220, saturation: 0.7, lightness: 0.4 },
+  'steel blue': { hue: 205, saturation: 0.3, lightness: 0.45 },
+  'slate blue': { hue: 215, saturation: 0.3, lightness: 0.4 },
+  'sky blue': { hue: 200, saturation: 0.55, lightness: 0.6 },
+  'light blue': { hue: 200, saturation: 0.5, lightness: 0.65 },
+  'powder blue': { hue: 200, saturation: 0.45, lightness: 0.7 },
+  'blue': { hue: 215, saturation: 0.6, lightness: 0.4 },
+  'black': { hue: 0, saturation: 0, lightness: 0.08 },
+  'jet black': { hue: 0, saturation: 0, lightness: 0.05 },
+  'charcoal': { hue: 0, saturation: 0.03, lightness: 0.22 },
+  'dark charcoal': { hue: 0, saturation: 0.03, lightness: 0.18 },
+  'gray': { hue: 0, saturation: 0.03, lightness: 0.5 },
+  'medium gray': { hue: 0, saturation: 0.03, lightness: 0.5 },
+  'light gray': { hue: 0, saturation: 0.03, lightness: 0.7 },
+  'heather gray': { hue: 0, saturation: 0.04, lightness: 0.6 },
+  'slate': { hue: 210, saturation: 0.1, lightness: 0.35 },
+  'white': { hue: 0, saturation: 0, lightness: 0.95 },
+  'off-white': { hue: 40, saturation: 0.2, lightness: 0.9 },
+  'cream': { hue: 40, saturation: 0.3, lightness: 0.88 },
+  'ivory': { hue: 45, saturation: 0.3, lightness: 0.9 },
+  'ecru': { hue: 40, saturation: 0.25, lightness: 0.85 },
+  'beige': { hue: 35, saturation: 0.3, lightness: 0.7 },
+  'tan': { hue: 30, saturation: 0.35, lightness: 0.6 },
+  'khaki': { hue: 40, saturation: 0.3, lightness: 0.55 },
+  'sand': { hue: 35, saturation: 0.3, lightness: 0.65 },
+  'oatmeal': { hue: 35, saturation: 0.2, lightness: 0.75 },
+  'camel': { hue: 30, saturation: 0.4, lightness: 0.5 },
+  'cognac': { hue: 25, saturation: 0.5, lightness: 0.4 },
+  'toffee': { hue: 28, saturation: 0.45, lightness: 0.4 },
+  'brown': { hue: 20, saturation: 0.45, lightness: 0.3 },
+  'dark brown': { hue: 20, saturation: 0.5, lightness: 0.2 },
+  'chocolate': { hue: 15, saturation: 0.5, lightness: 0.2 },
+  'espresso': { hue: 15, saturation: 0.45, lightness: 0.15 },
+  'tobacco': { hue: 25, saturation: 0.4, lightness: 0.35 },
+  'taupe': { hue: 30, saturation: 0.15, lightness: 0.45 },
+  'mushroom': { hue: 25, saturation: 0.12, lightness: 0.55 },
+  'mauve': { hue: 330, saturation: 0.2, lightness: 0.5 },
+  'dusty mauve': { hue: 340, saturation: 0.15, lightness: 0.5 },
+  'dusty rose': { hue: 350, saturation: 0.2, lightness: 0.55 },
+  'pink': { hue: 345, saturation: 0.35, lightness: 0.7 },
+  'blush': { hue: 350, saturation: 0.25, lightness: 0.8 },
+  'pastel pink': { hue: 350, saturation: 0.2, lightness: 0.85 },
+  'burgundy': { hue: 345, saturation: 0.6, lightness: 0.25 },
+  'maroon': { hue: 340, saturation: 0.55, lightness: 0.2 },
+  'wine': { hue: 340, saturation: 0.5, lightness: 0.25 },
+  'plum': { hue: 310, saturation: 0.4, lightness: 0.25 },
+  'olive': { hue: 80, saturation: 0.35, lightness: 0.3 },
+  'dark olive': { hue: 80, saturation: 0.35, lightness: 0.22 },
+  'army green': { hue: 85, saturation: 0.3, lightness: 0.3 },
+  'military': { hue: 85, saturation: 0.3, lightness: 0.28 },
+  'sage': { hue: 100, saturation: 0.2, lightness: 0.5 },
+  'sage green': { hue: 100, saturation: 0.2, lightness: 0.5 },
+  'muted sage': { hue: 100, saturation: 0.15, lightness: 0.5 },
+  'forest green': { hue: 140, saturation: 0.45, lightness: 0.2 },
+  'hunter green': { hue: 140, saturation: 0.4, lightness: 0.22 },
+  'teal': { hue: 170, saturation: 0.4, lightness: 0.25 },
+  'dark teal': { hue: 170, saturation: 0.4, lightness: 0.2 },
+  'pine': { hue: 155, saturation: 0.35, lightness: 0.22 },
+  'green': { hue: 120, saturation: 0.4, lightness: 0.35 },
+  'red': { hue: 0, saturation: 0.7, lightness: 0.45 },
+};
+
+function colorFromDescription(name) {
+  if (!name) return null;
+  const lower = name.toLowerCase();
+
+  // Try matching from longest to shortest color names
+  const sorted = Object.keys(COLOR_MAP).sort((a, b) => b.length - a.length);
+  for (const colorName of sorted) {
+    // Match at the start of the description or after common modifiers
+    const patterns = [
+      new RegExp(`^${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
+      new RegExp(`^(?:deep|dark|light|medium|warm|cool|muted|dusty|pure|solid|jet|crisp|very|pale|bright|rich|faded|washed)\\s+${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
+      new RegExp(`^(?:\\w+\\s+){0,2}${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
+    ];
+    for (const pat of patterns) {
+      if (pat.test(lower)) {
+        const base = { ...COLOR_MAP[colorName] };
+        // Adjust for modifiers
+        if (/^deep\b/i.test(lower)) { base.lightness = Math.max(0.05, base.lightness - 0.1); base.saturation = Math.min(1, base.saturation + 0.1); }
+        if (/^dark\b/i.test(lower)) base.lightness = Math.max(0.05, base.lightness - 0.08);
+        if (/^light\b/i.test(lower) || /^pale\b/i.test(lower)) base.lightness = Math.min(0.9, base.lightness + 0.15);
+        if (/^medium\b/i.test(lower)) base.lightness = Math.min(0.6, Math.max(0.35, base.lightness));
+        if (/^warm\b/i.test(lower)) { base.hue = (base.hue + 10) % 360; base.saturation = Math.min(1, base.saturation + 0.05); }
+        if (/^muted\b/i.test(lower) || /^dusty\b/i.test(lower)) base.saturation = Math.max(0.05, base.saturation - 0.1);
+        return base;
+      }
+    }
+  }
+  return null;
+}
+
 app.reanalyzeAllColors = async () => {
-  if (!confirm(`Re-analyze colors for all ${items.length} items?\n\nThis extracts colors from each item's photo using the improved color engine. No AI/API key needed.`)) return;
+  if (!confirm(`Fix colors for all ${items.length} items from their descriptions?`)) return;
   closeSheet();
-  showLoading('Re-analyzing colors...');
+  showLoading('Fixing colors...');
 
   let fixed = 0;
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    if (!item.imageId) continue;
-    document.getElementById('loading-msg').textContent = `Analyzing ${i + 1}/${items.length}...`;
-    try {
-      const imgData = await db.loadImage(item.imageId);
-      if (!imgData) continue;
-      const blob = (typeof imgData === 'string') ? await (await fetch(imgData)).blob() : imgData;
-      const { extractColorProfile } = await import('./color-engine.js?v=20');
-      const profile = await extractColorProfile(blob);
-      if (profile) {
-        item.colorProfile = profile;
-        await db.putItem(item);
-        fixed++;
-      }
-    } catch (e) {
-      console.warn(`[ReColor] Failed for ${item.name}:`, e);
+    document.getElementById('loading-msg').textContent = `Fixing ${i + 1}/${items.length}...`;
+    const color = colorFromDescription(item.name);
+    if (color) {
+      item.colorProfile = {
+        dominantColor: color,
+        secondaryColors: [],
+        averageColor: color,
+      };
+      await db.putItem(item);
+      fixed++;
     }
   }
 
   hideLoading();
   renderCurrentTab();
-  alert(`Done! Re-analyzed colors for ${fixed} items.`);
+  alert(`Fixed colors for ${fixed} items from their descriptions.`);
 };
 
 app.removeAllItems = async () => {
@@ -4857,10 +5005,66 @@ app.zoomImage = (event) => {
   if (!img.src) return;
   const overlay = document.createElement('div');
   overlay.className = 'zoom-overlay';
+  const container = document.createElement('div');
+  container.style.cssText = 'width:100%;height:100%;overflow:auto;display:flex;align-items:center;justify-content:center;-webkit-overflow-scrolling:touch';
   const zoomImg = document.createElement('img');
   zoomImg.src = img.src;
-  overlay.appendChild(zoomImg);
-  overlay.onclick = () => overlay.remove();
+  zoomImg.style.cssText = 'max-width:none;max-height:none;width:100%;transform-origin:center;transition:transform 0.3s';
+  let scale = 1;
+  let lastDist = 0;
+
+  // Double-tap to zoom in/out
+  let lastTap = 0;
+  zoomImg.addEventListener('click', (e) => {
+    const now = Date.now();
+    if (now - lastTap < 300) {
+      // Double tap: toggle between 1x and 3x
+      scale = scale > 1 ? 1 : 3;
+      zoomImg.style.transform = `scale(${scale})`;
+      if (scale > 1) {
+        zoomImg.style.width = '100%';
+        container.style.justifyContent = 'flex-start';
+        container.style.alignItems = 'flex-start';
+      } else {
+        container.style.justifyContent = 'center';
+        container.style.alignItems = 'center';
+      }
+      e.stopPropagation();
+    }
+    lastTap = now;
+  });
+
+  // Pinch to zoom
+  container.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    }
+  }, { passive: true });
+  container.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      if (lastDist > 0) {
+        scale = Math.max(1, Math.min(5, scale * (dist / lastDist)));
+        zoomImg.style.transform = `scale(${scale})`;
+        if (scale > 1) {
+          container.style.justifyContent = 'flex-start';
+          container.style.alignItems = 'flex-start';
+        }
+      }
+      lastDist = dist;
+    }
+  }, { passive: true });
+  container.addEventListener('touchend', () => { lastDist = 0; }, { passive: true });
+
+  // Close button
+  const closeBtn = document.createElement('div');
+  closeBtn.style.cssText = 'position:fixed;top:16px;right:16px;color:white;font-size:28px;cursor:pointer;z-index:10000;background:rgba(0,0,0,0.5);width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center';
+  closeBtn.textContent = '\u00D7';
+  closeBtn.onclick = (e) => { e.stopPropagation(); overlay.remove(); };
+
+  container.appendChild(zoomImg);
+  overlay.appendChild(container);
+  overlay.appendChild(closeBtn);
   document.body.appendChild(overlay);
 };
 
