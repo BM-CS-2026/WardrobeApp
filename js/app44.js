@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '45c';
+window.APP_VERSION = '45d';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -2807,15 +2807,21 @@ app.reanalyzeItem = async (id) => {
 
   showLoading('Re-analyzing item with AI...');
   try {
-    const blob = await db.loadImage(item.imageId);
-    if (!blob) { hideLoading(); alert('Image not found.'); return; }
+    const imgData = await db.loadImage(item.imageId);
+    if (!imgData) { hideLoading(); alert('Image not found.'); return; }
+    // Convert data URL to Blob if needed
+    const blob = (typeof imgData === 'string') ? dataUrlToBlob(imgData) : imgData;
 
     const garments = await analyzeOutfitPhoto(blob, apiKey);
     if (garments.length > 0) {
-      // Use the first garment's description and category
       const g = garments[0];
       item.name = g.description || item.name;
       item.category = CATEGORIES.find(c => c.id === g.category) ? g.category : item.category;
+      // Update color from the new description
+      const color = colorFromDescription(item.name);
+      if (color) {
+        item.colorProfile = { dominantColor: color, secondaryColors: [], averageColor: color };
+      }
       await db.putItem(item);
     }
 
