@@ -420,7 +420,7 @@ function setSyncDot(state) {
 }
 
 async function fixShoeDescriptions() {
-  const FIX_KEY = 'shoes_desc_fixed_v45b';
+  const FIX_KEY = 'shoes_desc_fixed_v45e';
   if (localStorage.getItem(FIX_KEY)) return;
 
   const fixes = {
@@ -475,7 +475,7 @@ async function fixShoeDescriptions() {
 }
 
 async function autoFixColorsIfNeeded() {
-  const COLOR_FIX_KEY = 'colors_fixed_v45c';
+  const COLOR_FIX_KEY = 'colors_fixed_v45e';
   if (localStorage.getItem(COLOR_FIX_KEY)) return; // already done
   if (items.length === 0) return;
 
@@ -875,7 +875,7 @@ const COLOR_MAP = {
   'medium gray': { hue: 0, saturation: 0.03, lightness: 0.5 },
   'light gray': { hue: 0, saturation: 0.03, lightness: 0.7 },
   'heather gray': { hue: 0, saturation: 0.04, lightness: 0.6 },
-  'slate': { hue: 210, saturation: 0.1, lightness: 0.35 },
+  'slate': { hue: 210, saturation: 0.2, lightness: 0.35 },
   'white': { hue: 0, saturation: 0, lightness: 0.95 },
   'off-white': { hue: 40, saturation: 0.2, lightness: 0.9 },
   'cream': { hue: 40, saturation: 0.3, lightness: 0.88 },
@@ -894,14 +894,14 @@ const COLOR_MAP = {
   'chocolate': { hue: 15, saturation: 0.5, lightness: 0.2 },
   'espresso': { hue: 15, saturation: 0.45, lightness: 0.15 },
   'tobacco': { hue: 25, saturation: 0.4, lightness: 0.35 },
-  'taupe': { hue: 30, saturation: 0.15, lightness: 0.45 },
-  'mushroom': { hue: 25, saturation: 0.12, lightness: 0.55 },
-  'mauve': { hue: 330, saturation: 0.2, lightness: 0.5 },
-  'dusty mauve': { hue: 340, saturation: 0.15, lightness: 0.5 },
-  'dusty rose': { hue: 350, saturation: 0.2, lightness: 0.55 },
-  'pink': { hue: 345, saturation: 0.35, lightness: 0.7 },
-  'blush': { hue: 350, saturation: 0.25, lightness: 0.8 },
-  'pastel pink': { hue: 350, saturation: 0.2, lightness: 0.85 },
+  'taupe': { hue: 30, saturation: 0.22, lightness: 0.45 },
+  'mushroom': { hue: 25, saturation: 0.2, lightness: 0.55 },
+  'mauve': { hue: 330, saturation: 0.3, lightness: 0.45 },
+  'dusty mauve': { hue: 340, saturation: 0.3, lightness: 0.5 },
+  'dusty rose': { hue: 350, saturation: 0.35, lightness: 0.55 },
+  'pink': { hue: 345, saturation: 0.45, lightness: 0.65 },
+  'blush': { hue: 350, saturation: 0.35, lightness: 0.75 },
+  'pastel pink': { hue: 350, saturation: 0.3, lightness: 0.82 },
   'burgundy': { hue: 345, saturation: 0.6, lightness: 0.25 },
   'maroon': { hue: 340, saturation: 0.55, lightness: 0.2 },
   'wine': { hue: 340, saturation: 0.5, lightness: 0.25 },
@@ -910,9 +910,9 @@ const COLOR_MAP = {
   'dark olive': { hue: 80, saturation: 0.35, lightness: 0.22 },
   'army green': { hue: 85, saturation: 0.3, lightness: 0.3 },
   'military': { hue: 85, saturation: 0.3, lightness: 0.28 },
-  'sage': { hue: 100, saturation: 0.2, lightness: 0.5 },
-  'sage green': { hue: 100, saturation: 0.2, lightness: 0.5 },
-  'muted sage': { hue: 100, saturation: 0.15, lightness: 0.5 },
+  'sage': { hue: 100, saturation: 0.3, lightness: 0.45 },
+  'sage green': { hue: 100, saturation: 0.3, lightness: 0.45 },
+  'muted sage': { hue: 100, saturation: 0.22, lightness: 0.48 },
   'forest green': { hue: 140, saturation: 0.45, lightness: 0.2 },
   'hunter green': { hue: 140, saturation: 0.4, lightness: 0.22 },
   'teal': { hue: 170, saturation: 0.4, lightness: 0.25 },
@@ -1295,8 +1295,8 @@ function colorName(c) {
   const h = c.hue, s = c.saturation, l = c.lightness;
   if (l < 0.12) return 'Black';
   if (l > 0.9 && s < 0.1) return 'White';
-  if (s < 0.08) return l < 0.4 ? 'Charcoal' : l < 0.65 ? 'Gray' : 'Light Gray';
-  if (s < 0.2) return l < 0.4 ? 'Dark Gray' : 'Gray';
+  if (s < 0.06) return l < 0.4 ? 'Charcoal' : l < 0.65 ? 'Gray' : 'Light Gray';
+  if (s < 0.12 && (h < 20 || h > 340)) return l < 0.4 ? 'Dark Gray' : 'Gray';
 
   let name = '';
   if (h < 15 || h >= 345) name = 'Red';
