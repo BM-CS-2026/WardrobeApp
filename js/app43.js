@@ -475,7 +475,7 @@ async function fixShoeDescriptions() {
 }
 
 async function autoFixColorsIfNeeded() {
-  const COLOR_FIX_KEY = 'colors_fixed_v45g';
+  const COLOR_FIX_KEY = 'colors_fixed_v45h';
   if (localStorage.getItem(COLOR_FIX_KEY)) return; // already done
   if (items.length === 0) return;
 
@@ -936,35 +936,38 @@ const COLOR_MAP = {
   'gray-brown': { hue: 25, saturation: 0.15, lightness: 0.45 },
   'blue-grey': { hue: 215, saturation: 0.15, lightness: 0.45 },
   'grey-green': { hue: 130, saturation: 0.15, lightness: 0.5 },
+  'gray-blue': { hue: 215, saturation: 0.3, lightness: 0.55 },
+  'natural beige': { hue: 35, saturation: 0.3, lightness: 0.78 },
+  'pale silver': { hue: 210, saturation: 0.1, lightness: 0.72 },
+  'silver-gray': { hue: 210, saturation: 0.08, lightness: 0.7 },
 };
 
 function colorFromDescription(name) {
   if (!name) return null;
   const lower = name.toLowerCase();
 
-  // Try matching from longest to shortest color names
+  // Only match in the FIRST part of the description (before first comma)
+  const firstClause = lower.split(',')[0];
+
   const sorted = Object.keys(COLOR_MAP).sort((a, b) => b.length - a.length);
   for (const colorName of sorted) {
     const esc = colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const patterns = [
       new RegExp(`^${esc}\\b`, 'i'),
       new RegExp(`^(?:deep|dark|light|medium|warm|cool|muted|dusty|pure|solid|jet|crisp|very|pale|bright|rich|faded|washed)\\s+${esc}\\b`, 'i'),
-      new RegExp(`^(?:\\w+\\s+){0,2}${esc}\\b`, 'i'),
-      // Match after "in" or "with" (for striped/patterned items)
-      new RegExp(`\\b(?:in|with)\\s+${esc}\\b`, 'i'),
-      // Match hyphenated compound colors at start (e.g., "Medium-dark")
-      new RegExp(`^(?:\\w+-\\w+\\s+){0,2}${esc}\\b`, 'i'),
+      new RegExp(`^(?:\\w+[\\s-]){0,2}${esc}\\b`, 'i'),
+      // Match "stripes in [color]" or "pinstripes in [color]" only in first clause
+      new RegExp(`stripes?\\s+in\\s+${esc}\\b`, 'i'),
     ];
     for (const pat of patterns) {
-      if (pat.test(lower)) {
+      if (pat.test(firstClause)) {
         const base = { ...COLOR_MAP[colorName] };
-        // Adjust for modifiers
         if (/^deep\b/i.test(lower)) { base.lightness = Math.max(0.05, base.lightness - 0.1); base.saturation = Math.min(1, base.saturation + 0.1); }
         if (/^dark\b/i.test(lower)) base.lightness = Math.max(0.05, base.lightness - 0.08);
         if (/^light\b/i.test(lower) || /^pale\b/i.test(lower)) base.lightness = Math.min(0.9, base.lightness + 0.15);
         if (/^medium\b/i.test(lower)) base.lightness = Math.min(0.6, Math.max(0.35, base.lightness));
         if (/^warm\b/i.test(lower)) { base.hue = (base.hue + 10) % 360; base.saturation = Math.min(1, base.saturation + 0.05); }
-        if (/^muted\b/i.test(lower) || /^dusty\b/i.test(lower)) base.saturation = Math.max(0.05, base.saturation - 0.1);
+        if (/^muted\b/i.test(lower) || /^dusty\b/i.test(lower)) base.saturation = Math.max(0.15, base.saturation - 0.05);
         return base;
       }
     }
