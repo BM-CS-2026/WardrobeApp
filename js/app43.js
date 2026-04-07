@@ -475,7 +475,7 @@ async function fixShoeDescriptions() {
 }
 
 async function autoFixColorsIfNeeded() {
-  const COLOR_FIX_KEY = 'colors_fixed_v45e';
+  const COLOR_FIX_KEY = 'colors_fixed_v45g';
   if (localStorage.getItem(COLOR_FIX_KEY)) return; // already done
   if (items.length === 0) return;
 
@@ -920,6 +920,22 @@ const COLOR_MAP = {
   'pine': { hue: 155, saturation: 0.35, lightness: 0.22 },
   'green': { hue: 120, saturation: 0.4, lightness: 0.35 },
   'red': { hue: 0, saturation: 0.7, lightness: 0.45 },
+  'royal blue': { hue: 225, saturation: 0.7, lightness: 0.4 },
+  // "grey" spellings (alias for gray variants)
+  'grey': { hue: 0, saturation: 0.03, lightness: 0.5 },
+  'light grey': { hue: 0, saturation: 0.03, lightness: 0.7 },
+  'dark grey': { hue: 0, saturation: 0.03, lightness: 0.3 },
+  'steel grey': { hue: 210, saturation: 0.15, lightness: 0.4 },
+  'charcoal grey': { hue: 0, saturation: 0.03, lightness: 0.22 },
+  // Compound colors
+  'caramel': { hue: 28, saturation: 0.45, lightness: 0.42 },
+  'silver': { hue: 0, saturation: 0.03, lightness: 0.72 },
+  'teal-green': { hue: 165, saturation: 0.35, lightness: 0.3 },
+  'olive-brown': { hue: 45, saturation: 0.3, lightness: 0.3 },
+  'taupe-gray': { hue: 30, saturation: 0.15, lightness: 0.5 },
+  'gray-brown': { hue: 25, saturation: 0.15, lightness: 0.45 },
+  'blue-grey': { hue: 215, saturation: 0.15, lightness: 0.45 },
+  'grey-green': { hue: 130, saturation: 0.15, lightness: 0.5 },
 };
 
 function colorFromDescription(name) {
@@ -929,11 +945,15 @@ function colorFromDescription(name) {
   // Try matching from longest to shortest color names
   const sorted = Object.keys(COLOR_MAP).sort((a, b) => b.length - a.length);
   for (const colorName of sorted) {
-    // Match at the start of the description or after common modifiers
+    const esc = colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const patterns = [
-      new RegExp(`^${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
-      new RegExp(`^(?:deep|dark|light|medium|warm|cool|muted|dusty|pure|solid|jet|crisp|very|pale|bright|rich|faded|washed)\\s+${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
-      new RegExp(`^(?:\\w+\\s+){0,2}${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
+      new RegExp(`^${esc}\\b`, 'i'),
+      new RegExp(`^(?:deep|dark|light|medium|warm|cool|muted|dusty|pure|solid|jet|crisp|very|pale|bright|rich|faded|washed)\\s+${esc}\\b`, 'i'),
+      new RegExp(`^(?:\\w+\\s+){0,2}${esc}\\b`, 'i'),
+      // Match after "in" or "with" (for striped/patterned items)
+      new RegExp(`\\b(?:in|with)\\s+${esc}\\b`, 'i'),
+      // Match hyphenated compound colors at start (e.g., "Medium-dark")
+      new RegExp(`^(?:\\w+-\\w+\\s+){0,2}${esc}\\b`, 'i'),
     ];
     for (const pat of patterns) {
       if (pat.test(lower)) {
