@@ -1158,18 +1158,25 @@ app.showColorPicker = (itemId, which) => {
   const current = which === 'dominant' ? cp.dominantColor : cp.secondaryColors?.[0];
   if (!current) return;
 
-  // Generate alternative colors based on current color with variations
+  // Save original color for undo
+  app._originalColor = { itemId, which, color: { ...current } };
+
   const alternatives = generateColorAlternatives(current);
 
   openSheet(`
     <h2>Pick ${which === 'dominant' ? 'Dominant' : 'Secondary'} Color</h2>
-    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:4px">${esc(item.name)}</p>
-    ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:100%;max-height:150px;object-fit:contain;border-radius:var(--radius);background:var(--bg);margin-bottom:12px">` : ''}
 
-    <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Current:</p>
-    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-      <div style="width:36px;height:36px;border-radius:50%;background:${hslToCss(current)};border:3px solid var(--accent);flex-shrink:0"></div>
-      <span style="font-size:13px;color:var(--text-secondary)">${colorName(current)}</span>
+    <!-- Item image + current color side by side -->
+    <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:16px">
+      ${item.imageId ? `<img data-image-id="${item.imageId}" class="lazy-img" style="width:50%;max-height:200px;object-fit:contain;border-radius:var(--radius);background:var(--bg);flex-shrink:0">` : ''}
+      <div style="flex:1">
+        <p style="font-size:12px;color:var(--text-secondary);margin:0 0 6px">${esc(item.name.substring(0, 60))}</p>
+        <p style="font-size:11px;color:var(--text-secondary);margin:0 0 4px">Current:</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="width:36px;height:36px;border-radius:50%;background:${hslToCss(current)};border:3px solid var(--accent);flex-shrink:0"></div>
+          <span style="font-size:12px;color:var(--text-secondary)">${colorName(current)}</span>
+        </div>
+      </div>
     </div>
 
     <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Tap a better match:</p>
@@ -1200,10 +1207,34 @@ app.showColorPicker = (itemId, which) => {
 
     <button class="btn btn-outline" style="margin-bottom:8px" onclick="app.customSwatchColor('${itemId}','${which}')">Custom Color Sliders</button>
     ${which === 'secondary' ? `<button class="btn btn-danger btn-sm" style="margin-bottom:8px" onclick="app.deleteSecondaryColor('${itemId}')">Remove Secondary Color</button>` : ''}
-    <button class="btn btn-secondary" onclick="closeSheet()">Cancel</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary" style="flex:1" onclick="closeSheet()">Cancel</button>
+      <button class="btn btn-outline" style="flex:1" onclick="app.undoColorPick()">Revert to Original</button>
+    </div>
   `);
   app._colorAlternatives = alternatives;
   lazyLoadImages();
+};
+
+app.undoColorPick = async () => {
+  const orig = app._originalColor;
+  if (!orig) { closeSheet(); return; }
+  const item = items.find(i => i.id === orig.itemId);
+  if (!item?.colorProfile) { closeSheet(); return; }
+
+  if (orig.which === 'dominant') {
+    item.colorProfile.dominantColor = orig.color;
+  } else if (item.colorProfile.secondaryColors?.length) {
+    item.colorProfile.secondaryColors[0] = orig.color;
+  }
+
+  await db.putItem(item);
+  closeSheet();
+  if (document.getElementById('detail-overlay')?.classList.contains('open')) {
+    app.showItemDetail(orig.itemId);
+  } else {
+    renderWardrobe();
+  }
 };
 
 function generateColorAlternatives(current) {
