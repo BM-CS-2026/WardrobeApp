@@ -2,7 +2,7 @@ import { colorScore, paletteAffinity } from './color-engine.js';
 import { CATEGORIES } from './utils.js';
 
 const MAX_RESULTS = 4;
-const TOP_PER_CATEGORY = 5;
+const TOP_PER_CATEGORY = 8;
 
 // seedItem can be a single item OR an array of items
 export function generateOutfits(allItems, palette, seedItem = null) {
@@ -32,7 +32,7 @@ export function generateOutfits(allItems, palette, seedItem = null) {
   const required = CATEGORIES.filter(c => c.required && !seedCats.has(c.id));
   const optional = CATEGORIES.filter(c => !c.required && !seedCats.has(c.id));
 
-  // Build slot arrays — for belt, put items first (before null) to favor inclusion
+  // Build slot arrays: shoes are ALWAYS required, belt favored
   const slots = [];
   for (const cat of required) {
     const items = buckets[cat.id] || [];
@@ -41,8 +41,10 @@ export function generateOutfits(allItems, palette, seedItem = null) {
   }
   for (const cat of optional) {
     const catItems = buckets[cat.id] || [];
-    if ((cat.id === 'belt' || cat.id === 'shoes') && catItems.length > 0) {
-      // Favor belts and shoes: put items first so they're included in most outfits
+    if (cat.id === 'shoes' && catItems.length > 0) {
+      // Shoes are always required in outfits
+      slots.push(catItems);
+    } else if (cat.id === 'belt' && catItems.length > 0) {
       slots.push([...catItems, null]);
     } else {
       slots.push([null, ...catItems]);
@@ -78,19 +80,16 @@ export function generateOutfits(allItems, palette, seedItem = null) {
 
   candidates.sort((a, b) => b.overallScore - a.overallScore);
 
-  // Enforce diversity: each outfit must differ by at least 2 items from all others
+  // Enforce diversity: no shared non-seed items between outfits
   const diverse = [];
   for (const c of candidates) {
     if (diverse.length >= MAX_RESULTS) break;
-    const cIds = new Set(c.items.map(i => i.id));
+    const cNonSeedIds = new Set(c.items.filter(i => !seedIds.has(i.id)).map(i => i.id));
     const tooSimilar = diverse.some(d => {
-      const dIds = new Set(d.items.map(i => i.id));
-      let shared = 0;
-      for (const id of cIds) { if (dIds.has(id)) shared++; }
-      const totalUnique = new Set([...cIds, ...dIds]).size;
-      const diffCount = totalUnique - shared;
-      // Must have at least 2 different items
-      return diffCount < 2;
+      const dNonSeedIds = new Set(d.items.filter(i => !seedIds.has(i.id)).map(i => i.id));
+      // Check if ANY non-seed item is shared
+      for (const id of cNonSeedIds) { if (dNonSeedIds.has(id)) return true; }
+      return false;
     });
     if (!tooSimilar) diverse.push(c);
   }

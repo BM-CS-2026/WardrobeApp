@@ -386,6 +386,9 @@ async function appInit() {
   // Start live sync for ongoing changes
   startSyncIfConfigured();
 
+  // Daily auto-backup push
+  scheduleDailyBackup();
+
   // Wire up persistent file inputs
   document.getElementById('file-picker-hidden').onchange = function() { app.handlePhotos(this); };
   document.getElementById('file-camera-hidden').onchange = function() { app.handlePhotos(this); };
@@ -408,6 +411,37 @@ function setSyncDot(state) {
   const colors = { paused: '#4CAF50', active: '#2196F3', error: '#f44336', off: '#999' };
   dot.style.background = colors[state] || colors.off;
   dot.title = state === 'paused' ? 'Synced' : state === 'active' ? 'Syncing...' : state === 'error' ? 'Sync error' : 'Sync not configured';
+}
+
+function scheduleDailyBackup() {
+  const url = db.getSyncUrl();
+  if (!url) return;
+  const BACKUP_KEY = 'last_backup_push';
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const lastPush = parseInt(localStorage.getItem(BACKUP_KEY) || '0');
+  if (Date.now() - lastPush > ONE_DAY) {
+    // Push after a short delay so app loads first
+    setTimeout(async () => {
+      try {
+        console.log('[Backup] Daily auto-push starting...');
+        await db.pushOnce(url);
+        localStorage.setItem(BACKUP_KEY, String(Date.now()));
+        console.log('[Backup] Daily auto-push complete');
+      } catch (e) {
+        console.warn('[Backup] Auto-push failed:', e.message);
+      }
+    }, 30000); // 30s after app init
+  }
+  // Schedule next check every 12 hours
+  setInterval(() => {
+    const last = parseInt(localStorage.getItem(BACKUP_KEY) || '0');
+    if (Date.now() - last > ONE_DAY) {
+      db.pushOnce(url).then(() => {
+        localStorage.setItem(BACKUP_KEY, String(Date.now()));
+        console.log('[Backup] Periodic push complete');
+      }).catch(e => console.warn('[Backup] Periodic push failed:', e.message));
+    }
+  }, 12 * 60 * 60 * 1000);
 }
 
 function startSyncIfConfigured() {
@@ -2450,7 +2484,7 @@ app.showItemDetail = async (id) => {
         <span style="font-size:12px;color:var(--text-secondary)">${currentIdx + 1} / ${sameCategory.length}</span>
         <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${nextId ? 'visible' : 'hidden'}" onclick="app.showItemDetail('${nextId}')">Next ›</button>
       </div>
-      ${imgSrc ? `<img src="${imgSrc}" class="detail-image">` : ''}
+      ${imgSrc ? `<img src="${imgSrc}" class="detail-image zoomable-img" onclick="app.zoomImage(this.src)">` : ''}
 
       <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:16px">
         <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Description (edit to correct)</div>
@@ -3489,7 +3523,7 @@ app.showOutfitDetail = async (id) => {
         <div class="outfit-detail-left">
           <div class="ai-image-wishlist-wrap" onclick="app.showImageWishPicker('${outfit.id}')">
             ${outfit.aiImageId ?
-              `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img" style="width:100%;border-radius:var(--radius);background:var(--bg);display:block">` :
+              `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img zoomable-img" onclick="app.zoomImage(this.src)" style="width:100%;border-radius:var(--radius);background:var(--bg);display:block">` :
               `<div style="width:100%;aspect-ratio:3/4;background:var(--bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px">AI image generating...</div>`}
             <div class="ai-image-hint">Tap image to add items to Wish List</div>
           </div>
@@ -4768,6 +4802,15 @@ window.closeSheet = closeSheet;
 app.closeSheet = closeSheet;
 
 // Detail view (full screen overlay)
+// Tap-to-zoom on detail images
+app.zoomImage = (src) => {
+  const overlay = document.createElement('div');
+  overlay.className = 'zoom-overlay';
+  overlay.innerHTML = `<img src="${src}">`;
+  overlay.onclick = () => overlay.remove();
+  document.body.appendChild(overlay);
+};
+
 // Swipe left/right navigation helper
 function _setupSwipe(elementId, onSwipeRight, onSwipeLeft) {
   const el = document.getElementById(elementId);
