@@ -484,6 +484,10 @@ app.showSyncSettings = async () => {
         💣 Nuke All Caches & Reload
       </button>
 
+      <button class="btn btn-sm btn-outline" style="margin-bottom:6px" onclick="app.reanalyzeAllColors()">
+        🎨 Re-analyze All Colors
+      </button>
+
       <button class="btn btn-sm btn-danger" style="margin-bottom:6px" onclick="app.removeAllItems()">
         🗑️ Remove All Items
       </button>
@@ -710,6 +714,37 @@ app.saveApiKeyFromSettings = async () => {
   } else {
     alert('Please enter a key.');
   }
+};
+
+app.reanalyzeAllColors = async () => {
+  if (!confirm(`Re-analyze colors for all ${items.length} items?\n\nThis extracts colors from each item's photo using the improved color engine. No AI/API key needed.`)) return;
+  closeSheet();
+  showLoading('Re-analyzing colors...');
+
+  let fixed = 0;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item.imageId) continue;
+    document.getElementById('loading-msg').textContent = `Analyzing ${i + 1}/${items.length}...`;
+    try {
+      const imgData = await db.loadImage(item.imageId);
+      if (!imgData) continue;
+      const blob = (typeof imgData === 'string') ? await (await fetch(imgData)).blob() : imgData;
+      const { extractColorProfile } = await import('./color-engine.js?v=20');
+      const profile = await extractColorProfile(blob);
+      if (profile) {
+        item.colorProfile = profile;
+        await db.putItem(item);
+        fixed++;
+      }
+    } catch (e) {
+      console.warn(`[ReColor] Failed for ${item.name}:`, e);
+    }
+  }
+
+  hideLoading();
+  renderCurrentTab();
+  alert(`Done! Re-analyzed colors for ${fixed} items.`);
 };
 
 app.removeAllItems = async () => {
@@ -2388,6 +2423,10 @@ app.showItemDetail = async (id) => {
   const item = items.find(i => i.id === id);
   if (!item) return;
 
+  // Build same-category list for swipe navigation
+  const sameCategory = items.filter(i => i.category === item.category);
+  const currentIdx = sameCategory.findIndex(i => i.id === id);
+
   let imgSrc = '';
   if (item.imageId) {
     const data = await db.loadImage(item.imageId);
@@ -2395,6 +2434,9 @@ app.showItemDetail = async (id) => {
   }
 
   const cp = item.colorProfile;
+  const prevId = currentIdx > 0 ? sameCategory[currentIdx - 1].id : null;
+  const nextId = currentIdx < sameCategory.length - 1 ? sameCategory[currentIdx + 1].id : null;
+
   openDetail(`
     <div class="detail-header">
       <button class="back-btn" onclick="app.closeDetail()">‹ Back</button>
@@ -2402,7 +2444,12 @@ app.showItemDetail = async (id) => {
       ${item.imageId ? `<button class="btn-icon" style="font-size:16px" onclick="app.removeItemBg('${item.id}')">✂️</button>` : ''}
       <button class="btn-icon" style="font-size:16px" onclick="app.deleteItem('${item.id}')">🗑️</button>
     </div>
-    <div class="detail-body">
+    <div class="detail-body" id="item-detail-swipe">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${prevId ? 'visible' : 'hidden'}" onclick="app.showItemDetail('${prevId}')">‹ Prev</button>
+        <span style="font-size:12px;color:var(--text-secondary)">${currentIdx + 1} / ${sameCategory.length}</span>
+        <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${nextId ? 'visible' : 'hidden'}" onclick="app.showItemDetail('${nextId}')">Next ›</button>
+      </div>
       ${imgSrc ? `<img src="${imgSrc}" class="detail-image">` : ''}
 
       <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:16px">
@@ -2448,6 +2495,9 @@ app.showItemDetail = async (id) => {
       ${cp ? `<button class="btn btn-outline" style="margin-top:8px" onclick="app.showColorMatching('${item.id}')">🎨 Potential Color Matching</button>` : ''}
     </div>
   `);
+
+  // Swipe navigation
+  _setupSwipe('item-detail-swipe', prevId ? () => app.showItemDetail(prevId) : null, nextId ? () => app.showItemDetail(nextId) : null);
   lazyLoadImages();
 };
 
@@ -3404,6 +3454,9 @@ app.showOutfitDetail = async (id) => {
   // Find outfit number (position in saved list)
   const saved = outfits.filter(o => o.isSaved).sort((a, b) => b.dateCreated - a.dateCreated);
   const outfitNum = saved.findIndex(o => o.id === id) + 1;
+  const currentIdx = saved.findIndex(o => o.id === id);
+  const prevOutfitId = currentIdx > 0 ? saved[currentIdx - 1].id : null;
+  const nextOutfitId = currentIdx < saved.length - 1 ? saved[currentIdx + 1].id : null;
 
   const isInWishlist = wishlist.some(w => w.outfitId === outfit.id);
   const isFav = !!outfit.favorite;
@@ -3416,7 +3469,7 @@ app.showOutfitDetail = async (id) => {
     outfit.completenessScore >= 0.4 ? 'Missing some optional pieces like belt or jacket' :
     'Missing essential items like pants or shirt';
   const styleExpl = outfit.styleScore >= 0.7 ? 'All items share a consistent style direction' :
-    outfit.styleScore >= 0.4 ? 'Mix of styles — some items don\'t match the vibe' :
+    outfit.styleScore >= 0.4 ? 'Mix of styles, some items don\'t match the vibe' :
     'Items have very different style tags (e.g. formal + sporty)';
 
   openDetail(`
@@ -3425,7 +3478,12 @@ app.showOutfitDetail = async (id) => {
       <h1 style="font-size:17px;flex:1">Outfit${outfitNum ? ' #' + outfitNum : ''}</h1>
       <button class="btn-icon" style="font-size:16px" onclick="app.deleteOutfit('${outfit.id}')">🗑️</button>
     </div>
-    <div class="detail-body">
+    <div class="detail-body" id="outfit-detail-swipe">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${prevOutfitId ? 'visible' : 'hidden'}" onclick="app.showOutfitDetail('${prevOutfitId}')">‹ Prev</button>
+        <span style="font-size:12px;color:var(--text-secondary)">${outfitNum} / ${saved.length}</span>
+        <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${nextOutfitId ? 'visible' : 'hidden'}" onclick="app.showOutfitDetail('${nextOutfitId}')">Next ›</button>
+      </div>
       <!-- Side-by-side: AI image left, items right -->
       <div class="outfit-detail-split">
         <div class="outfit-detail-left">
@@ -3540,6 +3598,9 @@ app.showOutfitDetail = async (id) => {
     }));
     drawOutfitColorWheel('outfit-color-wheel', colors);
   }, 50);
+
+  // Swipe navigation for outfits
+  _setupSwipe('outfit-detail-swipe', prevOutfitId ? () => app.showOutfitDetail(prevOutfitId) : null, nextOutfitId ? () => app.showOutfitDetail(nextOutfitId) : null);
 };
 
 app.applyOutfitFeedback = async (outfitId) => {
@@ -4707,6 +4768,24 @@ window.closeSheet = closeSheet;
 app.closeSheet = closeSheet;
 
 // Detail view (full screen overlay)
+// Swipe left/right navigation helper
+function _setupSwipe(elementId, onSwipeRight, onSwipeLeft) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  let startX = 0, startY = 0;
+  el.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+  el.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx)) return; // too short or vertical
+    if (dx > 0 && onSwipeRight) onSwipeRight();  // swipe right = prev
+    if (dx < 0 && onSwipeLeft) onSwipeLeft();     // swipe left = next
+  }, { passive: true });
+}
+
 function openDetail(html) {
   const d = document.getElementById('detail-overlay');
   // Parse HTML to separate the header from the body

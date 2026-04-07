@@ -182,11 +182,11 @@ body {
 .item-grid-scroll::-webkit-scrollbar { display: none; }
 
 .item-grid-scroll .item-card {
-  width: 105px;
+  width: 137px;
 }
 
 .item-grid-scroll .item-card .thumb {
-  height: 90px;
+  height: 117px;
   aspect-ratio: auto;
 }
 

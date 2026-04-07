@@ -11,11 +11,12 @@ export async function extractColorProfile(imageSource) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-  // Grid sampling (5x5)
-  const gridSize = 5;
+  // Grid sampling (7x7) with center weighting
+  const gridSize = 7;
   const cellW = canvas.width / gridSize;
   const cellH = canvas.height / gridSize;
   const samples = [];
+  const centerR = (gridSize - 1) / 2;
 
   for (let row = 0; row < gridSize; row++) {
     for (let col = 0; col < gridSize; col++) {
@@ -25,7 +26,6 @@ export async function extractColorProfile(imageSource) {
       const h = Math.round(cellH);
       const data = ctx.getImageData(x, y, w, h).data;
 
-      // Average color of this cell
       let rSum = 0, gSum = 0, bSum = 0, count = 0;
       for (let i = 0; i < data.length; i += 4) {
         rSum += data[i];
@@ -34,7 +34,11 @@ export async function extractColorProfile(imageSource) {
         count++;
       }
       if (count > 0) {
-        samples.push(rgbToHsl(rSum / count, gSum / count, bSum / count));
+        const hsl = rgbToHsl(rSum / count, gSum / count, bSum / count);
+        // Center-weight: inner cells get added multiple times
+        const distFromCenter = Math.max(Math.abs(row - centerR), Math.abs(col - centerR));
+        const weight = distFromCenter <= 1 ? 3 : distFromCenter <= 2 ? 2 : 1;
+        for (let w = 0; w < weight; w++) samples.push(hsl);
       }
     }
   }

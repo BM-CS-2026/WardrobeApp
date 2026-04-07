@@ -59,7 +59,12 @@ export function hueDistance(h1, h2) {
 }
 
 export function isBackground(hsl) {
-  return hsl.lightness > 0.9 || hsl.lightness < 0.1 || hsl.saturation < 0.05;
+  // Aggressive filter: photos are on white/cream sheets, cropped regions have gray fill
+  if (hsl.lightness > 0.82 || hsl.lightness < 0.12) return true;
+  if (hsl.saturation < 0.08) return true;
+  // Light grays with very low saturation (sheet/background)
+  if (hsl.lightness > 0.7 && hsl.saturation < 0.15) return true;
+  return false;
 }
 
 export function generateId() {
