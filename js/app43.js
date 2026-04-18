@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46b';
+window.APP_VERSION = '46c';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -3950,6 +3950,9 @@ app.showOutfitDetail = async (id) => {
 
   // Swipe navigation for outfits
   _setupSwipe('outfit-detail-swipe', prevOutfitId ? () => app.showOutfitDetail(prevOutfitId) : null, nextOutfitId ? () => app.showOutfitDetail(nextOutfitId) : null);
+
+  // Load weather
+  loadWeatherForOutfit();
 };
 
 // Remove an item type from outfit ("Without" button)
@@ -4029,19 +4032,30 @@ async function fetchWeather() {
   } catch { return null; }
 }
 
-// Auto-fill weather in outfit detail
-setTimeout(async () => {
+// Cache weather for the session so we don't re-fetch every outfit view
+let _cachedWeather = null;
+
+async function loadWeatherForOutfit() {
   const el = document.getElementById('weather-text');
   if (!el) return;
+
+  if (_cachedWeather) {
+    el.textContent = _cachedWeather.summary;
+    const sel = document.getElementById('weather-override');
+    if (sel) sel.value = _cachedWeather.category;
+    return;
+  }
+
   const w = await fetchWeather();
   if (w) {
+    _cachedWeather = w;
     el.textContent = w.summary;
     const sel = document.getElementById('weather-override');
     if (sel) sel.value = w.category;
   } else {
     el.textContent = 'Weather unavailable. Select manually.';
   }
-}, 500);
+}
 
 app.applyOutfitFeedback = async (outfitId) => {
   const feedback = document.getElementById('outfit-feedback-text')?.value?.trim();
