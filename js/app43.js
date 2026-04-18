@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46h';
+window.APP_VERSION = '46i';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -4083,10 +4083,12 @@ async function fetchWeather() {
       navigator.geolocation.getCurrentPosition(resolve, () => reject('no location'), { timeout: 5000 });
     });
     const { latitude: lat, longitude: lon } = pos.coords;
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=temperature_2m_min,temperature_2m_max&timezone=auto&forecast_days=1`);
     const data = await res.json();
     const temp = data.current_weather?.temperature;
     const code = data.current_weather?.weathercode;
+    const minTemp = data.daily?.temperature_2m_min?.[0];
+    const maxTemp = data.daily?.temperature_2m_max?.[0];
     if (temp == null) return null;
 
     let condition = 'clear';
@@ -4096,16 +4098,20 @@ async function fetchWeather() {
     else if ([95,96,99].includes(code)) condition = 'thunderstorm';
     else if ([45,48].includes(code)) condition = 'foggy';
 
+    // Use average day temperature for weather category
+    const avgTemp = (minTemp != null && maxTemp != null) ? (minTemp + maxTemp) / 2 : temp;
     let category = 'mild';
-    if (temp >= 30) category = 'hot';
-    else if (temp >= 24) category = 'warm';
-    else if (temp >= 18) category = 'mild';
-    else if (temp >= 10) category = 'cool';
+    if (avgTemp >= 30) category = 'hot';
+    else if (avgTemp >= 24) category = 'warm';
+    else if (avgTemp >= 18) category = 'mild';
+    else if (avgTemp >= 10) category = 'cool';
     else category = 'cold';
     if (condition === 'rainy' || condition === 'drizzle' || condition === 'thunderstorm') category = 'rainy';
 
-    const summary = `${Math.round(temp)}°C, ${condition}. ${category === 'hot' ? 'Light fabrics recommended' : category === 'cold' ? 'Layer up' : category === 'rainy' ? 'Bring a waterproof layer' : 'Comfortable for most outfits'}.`;
-    return { temp, condition, category, summary };
+    const minMax = (minTemp != null && maxTemp != null) ? `${Math.round(minTemp)}°-${Math.round(maxTemp)}°C` : `${Math.round(temp)}°C`;
+    const advice = category === 'hot' ? 'Light fabrics recommended' : category === 'cold' ? 'Layer up' : category === 'rainy' ? 'Bring a waterproof layer' : 'Comfortable for most outfits';
+    const summary = `${minMax}, ${condition}. ${advice}.`;
+    return { temp, minTemp, maxTemp, avgTemp, condition, category, summary };
   } catch { return null; }
 }
 
