@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46f';
+window.APP_VERSION = '46g';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -2615,7 +2615,8 @@ function showOutfitStep2() {
       `).join('')}
     </div>
 
-    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;margin-top:20px">What's the weather?</p>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;margin-top:20px">What's the weather?</p>
+    <div id="auto-weather-line" style="font-size:12px;color:var(--accent);margin-bottom:8px"></div>
     <div class="weather-grid">
       ${WEATHERS.map(w => `
         <div class="weather-chip ${outfitWeather === w.id ? 'selected' : ''}" onclick="app.selectWeather('${w.id}')">
@@ -2649,6 +2650,23 @@ function showOutfitStep2() {
     <button class="btn btn-secondary" style="margin-top:8px" onclick="closeSheet(); showOutfitStep1()">‹ Back</button>
   `);
   lazyLoadImages();
+
+  // Auto-detect weather and pre-select
+  (async () => {
+    const w = _cachedWeather || await fetchWeather();
+    if (w) {
+      _cachedWeather = w;
+      const line = document.getElementById('auto-weather-line');
+      if (line) line.textContent = `🌡️ ${w.summary}`;
+      // Auto-select the matching weather chip if none selected
+      if (!outfitWeather) {
+        outfitWeather = w.category;
+        document.querySelectorAll('.weather-chip').forEach(chip => {
+          chip.classList.toggle('selected', chip.getAttribute('onclick')?.includes(`'${w.category}'`));
+        });
+      }
+    }
+  })();
 }
 
 app.selectVibe = (vibeId) => {
@@ -3879,21 +3897,6 @@ app.showOutfitDetail = async (id) => {
         </div>
       </div>
 
-      <!-- Weather -->
-      <div id="outfit-weather" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:12px;font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:8px">
-        <span>🌡️</span>
-        <span id="weather-text">Checking weather...</span>
-        <select id="weather-override" style="margin-left:auto;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text1)">
-          <option value="auto">Auto</option>
-          <option value="hot">☀️ Hot</option>
-          <option value="warm">🌤️ Warm</option>
-          <option value="mild">⛅ Mild</option>
-          <option value="cool">🌥️ Cool</option>
-          <option value="cold">❄️ Cold</option>
-          <option value="rainy">🌧️ Rainy</option>
-        </select>
-      </div>
-
       <!-- Complaint / Style Learning -->
       <div style="margin-bottom:12px">
         <button class="btn btn-sm btn-outline" style="width:100%" onclick="app.showOutfitComplaint('${outfit.id}')">🗣️ Something wrong with this look?</button>
@@ -3970,8 +3973,6 @@ app.showOutfitDetail = async (id) => {
   // Swipe navigation for outfits
   _setupSwipe('outfit-detail-swipe', prevOutfitId ? () => app.showOutfitDetail(prevOutfitId) : null, nextOutfitId ? () => app.showOutfitDetail(nextOutfitId) : null);
 
-  // Load weather
-  loadWeatherForOutfit();
 };
 
 // Remove an item type from outfit ("Without" button)
