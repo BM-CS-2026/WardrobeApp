@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46m';
+window.APP_VERSION = '46n';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -4050,15 +4050,23 @@ app.showOutfitDetail = async (id) => {
         <span style="font-size:12px;color:var(--text-secondary)">${outfitNum} / ${saved.length}</span>
         <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${nextOutfitId ? 'visible' : 'hidden'}" onclick="app.showOutfitDetail('${nextOutfitId}')">Next ›</button>
       </div>
-      <!-- Occasion badge -->
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <!-- Occasion + Favorite row -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;background:var(--card);border-radius:var(--radius);border:1.5px solid var(--border)">
         ${(() => {
           const vibe = VIBES.find(v => v.id === outfit.vibe);
           return vibe
-            ? `<span style="padding:4px 12px;background:var(--accent-light);border-radius:16px;font-size:13px;font-weight:600;color:var(--accent)">${vibe.icon} ${vibe.name}</span>`
-            : `<span style="padding:4px 12px;background:var(--bg);border-radius:16px;font-size:12px;color:var(--text-secondary)">No occasion set</span>`;
+            ? `<span style="font-size:15px;font-weight:700;color:var(--accent)">${vibe.icon} ${vibe.name}</span>`
+            : `<span style="font-size:13px;color:var(--text-secondary)">No occasion</span>`;
         })()}
-        <button class="btn btn-sm btn-outline" style="margin-left:auto;font-size:11px;padding:4px 10px" onclick="app.changeOutfitOccasion('${outfit.id}')">Change</button>
+        <button class="btn btn-sm btn-outline" style="font-size:11px;padding:3px 8px" onclick="app.changeOutfitOccasion('${outfit.id}')">Change</button>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-sm ${isFav ? 'btn-primary' : 'btn-outline'}" style="padding:4px 12px" onclick="app.toggleFavoriteDetail('${outfit.id}')">
+            ${isFav ? '❤️ Favorite' : '🤍 Favorite'}
+          </button>
+          ${isInWishlist
+            ? `<button class="btn btn-sm btn-secondary" style="padding:4px 10px" onclick="app.toggleWishlist('${outfit.id}')">✓ Wish</button>`
+            : `<button class="btn btn-sm btn-outline" style="padding:4px 10px" onclick="app.showImageWishPicker('${outfit.id}')">🛒 Wish</button>`}
+        </div>
       </div>
       <!-- Side-by-side: AI image left, items right -->
       <div class="outfit-detail-split">
@@ -4067,14 +4075,6 @@ app.showOutfitDetail = async (id) => {
             ${outfit.aiImageId ?
               `<img data-ai-image-id="${outfit.aiImageId}" class="lazy-ai-img zoomable-img" onclick="app.zoomImage(event)" style="width:100%;border-radius:var(--radius);background:var(--bg);display:block">` :
               `<div style="width:100%;aspect-ratio:3/4;background:var(--bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px">AI image generating...</div>`}
-            <div class="ai-image-hint">Tap image to add items to Wish List</div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:12px">
-            ${isInWishlist ? `<button class="btn btn-sm btn-secondary" style="flex:1" onclick="app.toggleWishlist('${outfit.id}')">✓ In Wish List</button>` :
-              `<button class="btn btn-sm btn-outline" style="flex:1" onclick="app.showImageWishPicker('${outfit.id}')">🛒 Wish List</button>`}
-            <button class="btn btn-sm btn-outline" style="flex:1" onclick="app.toggleFavoriteDetail('${outfit.id}')">
-              ${isFav ? '❤️ Favorited' : '🤍 Favorite'}
-            </button>
           </div>
         </div>
         <div class="outfit-detail-right">
