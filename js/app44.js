@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46k';
+window.APP_VERSION = '46l';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -4050,6 +4050,16 @@ app.showOutfitDetail = async (id) => {
         <span style="font-size:12px;color:var(--text-secondary)">${outfitNum} / ${saved.length}</span>
         <button class="btn btn-sm btn-outline" style="padding:4px 12px;visibility:${nextOutfitId ? 'visible' : 'hidden'}" onclick="app.showOutfitDetail('${nextOutfitId}')">Next ›</button>
       </div>
+      <!-- Occasion badge -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        ${(() => {
+          const vibe = VIBES.find(v => v.id === outfit.vibe);
+          return vibe
+            ? `<span style="padding:4px 12px;background:var(--accent-light);border-radius:16px;font-size:13px;font-weight:600;color:var(--accent)">${vibe.icon} ${vibe.name}</span>`
+            : `<span style="padding:4px 12px;background:var(--bg);border-radius:16px;font-size:12px;color:var(--text-secondary)">No occasion set</span>`;
+        })()}
+        <button class="btn btn-sm btn-outline" style="margin-left:auto;font-size:11px;padding:4px 10px" onclick="app.changeOutfitOccasion('${outfit.id}')">Change</button>
+      </div>
       <!-- Side-by-side: AI image left, items right -->
       <div class="outfit-detail-split">
         <div class="outfit-detail-left">
@@ -4173,6 +4183,90 @@ app.showOutfitDetail = async (id) => {
 };
 
 // Remove an item type from outfit ("Without" button)
+app.changeOutfitOccasion = (outfitId) => {
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+
+  openSheet(`
+    <h2>Change Occasion</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Pick a new occasion. The app will swap one item to better fit.</p>
+    <div class="vibe-grid">
+      ${VIBES.map(v => `
+        <div class="vibe-card ${outfit.vibe === v.id ? 'selected' : ''}" onclick="app.applyNewOccasion('${outfitId}','${v.id}')" style="cursor:pointer">
+          <div class="vibe-icon">${v.icon}</div>
+          <div class="vibe-name">${v.name}</div>
+        </div>
+      `).join('')}
+    </div>
+    <button class="btn btn-secondary" style="margin-top:12px" onclick="closeSheet()">Cancel</button>
+  `);
+};
+
+app.applyNewOccasion = async (outfitId, newVibeId) => {
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+  const oldVibe = outfit.vibe;
+  if (newVibeId === oldVibe) { closeSheet(); return; }
+
+  const vibe = VIBES.find(v => v.id === newVibeId);
+  if (!vibe) return;
+
+  closeSheet();
+  showLoading('Adjusting outfit for ' + vibe.name + '...');
+
+  const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
+
+  // Find the weakest-fitting item for the new occasion
+  // Items excluded from this occasion are the worst fit
+  let worstIdx = -1;
+  let worstScore = Infinity;
+
+  for (let i = 0; i < oi.length; i++) {
+    const item = oi[i];
+    // If item is excluded from this occasion, it's the worst fit
+    if (item.excludeOccasions?.includes(newVibeId)) {
+      worstIdx = i;
+      break;
+    }
+    // Otherwise score by style tag overlap with the vibe
+    const tagOverlap = (item.styleTags || []).filter(t => (vibe.tags || []).includes(t)).length;
+    const score = tagOverlap + (item.styleTags?.length ? 0.5 : 0);
+    if (score < worstScore) {
+      worstScore = score;
+      worstIdx = i;
+    }
+  }
+
+  if (worstIdx >= 0) {
+    const worstItem = oi[worstIdx];
+    const cat = worstItem.category;
+    // Find a better alternative in the same category
+    const alternatives = items.filter(it =>
+      it.id !== worstItem.id &&
+      it.category === cat &&
+      !outfit.itemIds.includes(it.id) &&
+      !(it.excludeOccasions || []).includes(newVibeId)
+    );
+
+    if (alternatives.length > 0) {
+      // Pick the one with best style tag match to the vibe
+      alternatives.sort((a, b) => {
+        const aMatch = (a.styleTags || []).filter(t => (vibe.tags || []).includes(t)).length;
+        const bMatch = (b.styleTags || []).filter(t => (vibe.tags || []).includes(t)).length;
+        return bMatch - aMatch;
+      });
+      outfit.itemIds[worstIdx] = alternatives[0].id;
+      outfit.aiImageId = null; // need new AI image
+    }
+  }
+
+  outfit.vibe = newVibeId;
+  await db.putOutfit(outfit);
+
+  hideLoading();
+  app.showOutfitDetail(outfitId);
+};
+
 app.removeItemFromOutfit = async (outfitId, itemIdx) => {
   const outfit = outfits.find(o => o.id === outfitId);
   if (!outfit) return;
@@ -5168,6 +5262,7 @@ async function autoSaveOutfits(results) {
       styleScore: r.styleScore,
       overallScore: r.overallScore,
       aiImageId: aiBlob ? cacheKey : null,
+      vibe: outfitVibe || null,
     });
     await db.putOutfit(outfit);
     outfits.push(outfit);

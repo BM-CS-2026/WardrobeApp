@@ -22,7 +22,7 @@ export function createColorPalette({ name, colors, harmonyType, isBuiltIn = fals
   };
 }
 
-export function createOutfit({ itemIds, colorScore, completenessScore, styleScore, overallScore, aiImageId = null }) {
+export function createOutfit({ itemIds, colorScore, completenessScore, styleScore, overallScore, aiImageId = null, vibe = null }) {
   return {
     id: generateId(),
     itemIds,
@@ -31,6 +31,7 @@ export function createOutfit({ itemIds, colorScore, completenessScore, styleScor
     styleScore,
     overallScore,
     aiImageId,
+    vibe,
     isSaved: true,
     dateCreated: Date.now(),
   };
