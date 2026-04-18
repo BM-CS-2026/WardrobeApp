@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46a';
+window.APP_VERSION = '46b';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -2755,7 +2755,6 @@ app.showItemDetail = async (id) => {
     <div class="detail-header">
       <button class="back-btn" onclick="app.closeDetail()">‹ Back</button>
       <h1 style="font-size:17px;flex:1">${esc(item.name)}</h1>
-      ${item.imageId ? `<button class="btn-icon" style="font-size:16px" onclick="app.removeItemBg('${item.id}')">✂️</button>` : ''}
       <button class="btn-icon" style="font-size:16px" onclick="app.deleteItem('${item.id}')">🗑️</button>
     </div>
     <div class="detail-body" id="item-detail-swipe">
@@ -2766,35 +2765,35 @@ app.showItemDetail = async (id) => {
       </div>
       ${imgSrc ? `<img src="${imgSrc}" class="detail-image zoomable-img" onclick="app.zoomImage(event)">` : ''}
 
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn btn-primary" style="flex:2" onclick="app.generateFromItem('${item.id}')">✨ Generate Outfits</button>
-        <button class="btn btn-outline" style="flex:1" onclick="app.pickSecondItem('${item.id}')">+ With Another</button>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <button class="btn btn-sm btn-primary" style="flex:2;font-size:13px;padding:8px 0" onclick="app.generateFromItem('${item.id}')">✨ Generate Outfits</button>
+        <button class="btn btn-sm btn-outline" style="flex:1;font-size:12px;padding:8px 0" onclick="app.pickSecondItem('${item.id}')">+ With Another</button>
       </div>
 
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-        <span style="padding:5px 12px;background:var(--bg);border-radius:16px;font-size:13px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''} ${CATEGORIES.find(c => c.id === item.category)?.name || ''}</span>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="padding:4px 10px;background:var(--bg);border-radius:16px;font-size:13px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''} ${CATEGORIES.find(c => c.id === item.category)?.name || ''}</span>
         ${cp ? `
           <div style="display:flex;gap:6px;align-items:center;cursor:pointer" onclick="app.showColorPicker('${item.id}','dominant')">
             <div class="swatch" style="background:${hslToCss(cp.dominantColor)};border:1px solid var(--border)"></div>
-            <span style="font-size:11px;color:var(--text-secondary)">${colorName(cp.dominantColor)}</span>
+            <span style="font-size:12px;color:var(--text-secondary)">${colorName(cp.dominantColor)}</span>
           </div>
         ` : ''}
         <span style="margin-left:auto;font-size:12px;color:var(--text-secondary)">${new Date(item.dateAdded).toLocaleDateString()}</span>
       </div>
 
       <!-- Occasion exclusions -->
-      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Exclude from occasions:</div>
+      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Exclude from occasions:</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           ${VIBES.map(v => `
-            <span class="tag ${(item.excludeOccasions || []).includes(v.id) ? 'active' : ''}" style="cursor:pointer;font-size:11px" onclick="app.toggleExcludeOccasion('${item.id}','${v.id}')">${v.icon} ${v.name}</span>
+            <span class="tag ${(item.excludeOccasions || []).includes(v.id) ? 'active' : ''}" style="cursor:pointer;font-size:12px" onclick="app.toggleExcludeOccasion('${item.id}','${v.id}')">${v.icon} ${v.name}</span>
           `).join('')}
         </div>
       </div>
 
-      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Description (edit to correct)</div>
-        <textarea id="item-name-edit" rows="2" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;resize:vertical">${esc(item.name)}</textarea>
+      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Description (edit to correct)</div>
+        <textarea id="item-name-edit" rows="2" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit;resize:vertical">${esc(item.name)}</textarea>
         <div style="display:flex;gap:8px;margin-top:6px">
           <button class="btn btn-sm btn-primary" style="flex:1" onclick="app.saveItemName('${item.id}')">Save</button>
           <button class="btn btn-sm btn-outline" style="flex:1" onclick="app.reanalyzeItem('${item.id}')">🔄 Re-analyze</button>
