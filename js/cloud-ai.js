@@ -93,7 +93,14 @@ export async function generateOutfitImage(itemDescriptions, apiKey) {
     return typeof d === 'object' ? d.name : d;
   }).join('; ');
 
-  const prompt = `Ultra-realistic professional fashion editorial photo. CRITICAL: This MUST be a FULL BODY shot showing the ENTIRE person from the top of the head all the way down to the SHOES ON THE FLOOR. The feet and shoes MUST be fully visible at the bottom of the frame with empty floor space below them. Leave at least 10% margin above the head and below the shoes. A tall, lean and athletic man in his late 40s with dark brown wavy/slightly tousled hair, short salt-and-pepper stubble beard, olive/Mediterranean skin tone, angular face with defined jawline, wearing rectangular brown-frame glasses. He is wearing EXACTLY these items: ${itemList}. Match each color and material precisely, do not substitute or change any item. Standing straight in a relaxed pose, neutral light gray studio background. Camera at waist height, shooting full length portrait. The SHOES must be clearly visible and identifiable at the bottom. Do NOT crop at the ankles or calves. Studio lighting, sharp detail on fabric weave and texture. No text, no watermarks.`;
+  // Extract shoe description if present for emphasis
+  const shoeDesc = itemDescriptions.find(d => {
+    const name = (typeof d === 'object' ? d.name : d).toLowerCase();
+    return name.includes('shoe') || name.includes('sneaker') || name.includes('boot') || name.includes('loafer') || name.includes('oxford') || name.includes('derby');
+  });
+  const shoeEmphasis = shoeDesc ? `His feet are wearing: ${typeof shoeDesc === 'object' ? shoeDesc.name : shoeDesc}. The shoes are resting flat on the gray floor and are sharply in focus.` : '';
+
+  const prompt = `A fashion catalog photograph shot in a professional studio. The scene: a polished light gray concrete floor stretches across the bottom of the frame. Standing on this floor is a tall, lean man in his late 40s, dark brown wavy hair, short salt-and-pepper stubble, olive/Mediterranean skin, angular jawline, rectangular brown-frame glasses. The camera is positioned 4 meters away at knee height, tilted slightly upward, capturing his ENTIRE body from the floor beneath his shoes to above his head. The composition has 15% empty floor visible below his feet and 10% empty space above his head. He is wearing EXACTLY: ${itemList}. ${shoeEmphasis} The man stands in a relaxed pose with weight evenly distributed. Studio lighting from above-left creates clean shadows. Sharp detail on every fabric texture and material. The image is framed like a full-length mirror reflection showing every item from head to toe. No text, no watermarks, no cropping.`;
 
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',

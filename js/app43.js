@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46j';
+window.APP_VERSION = '46k';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
