@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46i';
+window.APP_VERSION = '46j';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -1294,55 +1294,181 @@ app.undoColorPick = async () => {
 };
 
 function generateColorAlternatives(current) {
+  // Each color has a specific name via the colorName() function
   const c = (h,s,l) => ({ hue:h, saturation:s, lightness:l });
   return [
-    { label: 'Neutrals', colors: [
-      c(0,0,0.03), c(0,0,0.1), c(0,0,0.2), c(0,0,0.3), c(0,0,0.4),
-      c(0,0,0.5), c(0,0,0.6), c(0,0,0.7), c(0,0,0.82), c(0,0,0.95),
+    { label: 'Blacks & Charcoals', colors: [
+      c(0,0,0.03),    // Jet Black
+      c(0,0,0.08),    // Black
+      c(0,0,0.14),    // Charcoal
+      c(0,0,0.2),     // Dark Charcoal
+      c(220,0.08,0.18),// Midnight
+      c(0,0,0.28),    // Charcoal Gray
+      c(210,0.06,0.25),// Gunmetal
+    ]},
+    { label: 'Grays', colors: [
+      c(0,0,0.35),    // Dark Gray
+      c(0,0,0.42),    // Medium Dark Gray
+      c(0,0,0.5),     // Gray
+      c(210,0.05,0.5), // Steel Gray
+      c(0,0,0.6),     // Medium Gray
+      c(0,0,0.7),     // Light Gray
+      c(0,0,0.8),     // Silver
     ]},
     { label: 'Warm Grays & Taupes', colors: [
-      c(30,0.08,0.2), c(30,0.1,0.3), c(30,0.1,0.4), c(30,0.08,0.5), c(30,0.08,0.6),
-      c(25,0.12,0.45), c(35,0.15,0.55), c(40,0.12,0.65), c(35,0.1,0.75), c(40,0.08,0.85),
+      c(25,0.12,0.25), // Dark Taupe
+      c(30,0.1,0.35),  // Warm Charcoal
+      c(30,0.15,0.42), // Taupe
+      c(25,0.12,0.5),  // Mushroom
+      c(35,0.15,0.55), // Warm Gray
+      c(30,0.1,0.65),  // Greige
+      c(40,0.08,0.75), // Light Taupe
     ]},
     { label: 'Whites & Creams', colors: [
-      c(0,0,0.97), c(40,0.2,0.92), c(50,0.5,0.93), c(40,0.6,0.88), c(45,0.3,0.9),
-      c(30,0.15,0.91), c(40,0.3,0.87), c(35,0.25,0.85), c(48,0.6,0.7), c(45,0.35,0.75),
+      c(0,0,0.97),     // White
+      c(0,0,0.93),     // Off-White
+      c(40,0.2,0.92),  // Ivory
+      c(40,0.3,0.9),   // Cream
+      c(45,0.35,0.87), // Ecru
+      c(35,0.25,0.84), // Oatmeal
+      c(40,0.4,0.8),   // Vanilla
     ]},
     { label: 'Browns', colors: [
-      c(20,0.5,0.15), c(25,0.4,0.2), c(20,0.55,0.22), c(25,0.5,0.28), c(15,0.55,0.3),
-      c(22,0.6,0.35), c(30,0.6,0.4), c(35,0.45,0.5), c(35,0.4,0.55), c(40,0.35,0.6),
+      c(15,0.5,0.12),  // Espresso
+      c(20,0.55,0.17), // Dark Chocolate
+      c(20,0.5,0.22),  // Chocolate
+      c(22,0.45,0.27), // Coffee
+      c(25,0.5,0.3),   // Dark Brown
+      c(25,0.55,0.35), // Walnut
+      c(22,0.6,0.38),  // Chestnut
+      c(28,0.5,0.4),   // Brown
+      c(25,0.45,0.45), // Cocoa
+      c(30,0.5,0.48),  // Cognac
+      c(30,0.55,0.52), // Saddle
+      c(35,0.45,0.55), // Caramel
+      c(32,0.4,0.58),  // Toffee
+      c(35,0.4,0.62),  // Tan
+      c(38,0.35,0.67), // Sand
     ]},
-    { label: 'Reds', colors: [
-      c(345,0.6,0.2), c(340,0.55,0.25), c(345,0.6,0.3), c(350,0.75,0.35), c(0,0.8,0.4),
-      c(0,0.8,0.45), c(5,0.85,0.5), c(350,0.7,0.55), c(345,0.5,0.6), c(350,0.4,0.7),
+    { label: 'Beiges & Khakis', colors: [
+      c(35,0.3,0.55),  // Dark Khaki
+      c(40,0.3,0.6),   // Khaki
+      c(38,0.35,0.65), // Wheat
+      c(35,0.3,0.7),   // Beige
+      c(40,0.35,0.72), // Sand
+      c(42,0.3,0.75),  // Light Khaki
+      c(38,0.25,0.78), // Linen
+    ]},
+    { label: 'Reds & Burgundy', colors: [
+      c(345,0.6,0.18), // Oxblood
+      c(340,0.55,0.22), // Burgundy
+      c(350,0.6,0.28),  // Wine
+      c(345,0.65,0.32), // Maroon
+      c(0,0.7,0.35),    // Dark Red
+      c(355,0.75,0.4),  // Crimson
+      c(0,0.8,0.45),    // Red
+      c(5,0.85,0.5),    // Bright Red
+      c(350,0.6,0.55),  // Brick Red
+      c(355,0.45,0.6),  // Rosewood
     ]},
     { label: 'Oranges & Rust', colors: [
-      c(15,0.7,0.3), c(15,0.65,0.35), c(20,0.8,0.4), c(25,0.85,0.45), c(25,0.85,0.5),
-      c(20,0.7,0.55), c(25,0.6,0.6), c(28,0.65,0.65), c(25,0.6,0.7), c(30,0.5,0.75),
+      c(12,0.65,0.28),  // Dark Rust
+      c(15,0.7,0.33),   // Rust
+      c(18,0.65,0.38),  // Burnt Orange
+      c(20,0.75,0.42),  // Terracotta
+      c(22,0.8,0.47),   // Sienna
+      c(25,0.85,0.52),  // Orange
+      c(28,0.8,0.58),   // Tangerine
+      c(30,0.7,0.65),   // Peach
+      c(25,0.55,0.72),  // Salmon
+      c(20,0.4,0.78),   // Apricot
     ]},
-    { label: 'Yellows & Gold', colors: [
-      c(42,0.65,0.3), c(45,0.7,0.38), c(45,0.7,0.45), c(50,0.85,0.5), c(50,0.85,0.55),
-      c(48,0.6,0.6), c(55,0.85,0.6), c(48,0.6,0.7), c(50,0.5,0.75), c(52,0.4,0.8),
+    { label: 'Golds & Yellows', colors: [
+      c(42,0.6,0.3),    // Dark Gold
+      c(45,0.65,0.38),  // Antique Gold
+      c(45,0.7,0.42),   // Gold
+      c(48,0.75,0.48),  // Amber
+      c(50,0.8,0.52),   // Mustard
+      c(52,0.85,0.58),  // Golden Yellow
+      c(55,0.8,0.65),   // Yellow
+      c(50,0.6,0.72),   // Butter
+      c(48,0.5,0.78),   // Cream Gold
+      c(52,0.4,0.82),   // Pale Gold
+    ]},
+    { label: 'Olives & Sage', colors: [
+      c(75,0.35,0.2),   // Dark Olive
+      c(80,0.35,0.28),  // Military Olive
+      c(85,0.3,0.33),   // Army Green
+      c(80,0.3,0.38),   // Olive
+      c(90,0.25,0.42),  // Moss
+      c(95,0.25,0.48),  // Sage
+      c(100,0.2,0.52),  // Muted Sage
+      c(100,0.22,0.58), // Dusty Sage
+      c(105,0.18,0.65), // Light Sage
     ]},
     { label: 'Greens', colors: [
-      c(140,0.45,0.2), c(80,0.4,0.3), c(85,0.35,0.35), c(130,0.2,0.4), c(120,0.5,0.35),
-      c(140,0.6,0.35), c(150,0.4,0.4), c(150,0.45,0.5), c(130,0.2,0.55), c(150,0.35,0.6),
+      c(140,0.5,0.15),  // Deep Forest
+      c(140,0.45,0.22), // Forest Green
+      c(145,0.4,0.28),  // Pine
+      c(150,0.45,0.33), // Hunter Green
+      c(135,0.5,0.38),  // Emerald
+      c(120,0.5,0.35),  // Green
+      c(150,0.4,0.42),  // Jade
+      c(160,0.35,0.48), // Sea Green
+      c(150,0.35,0.55), // Medium Green
+      c(140,0.3,0.62),  // Celadon
     ]},
     { label: 'Teals & Aqua', colors: [
-      c(180,0.5,0.25), c(175,0.45,0.3), c(180,0.5,0.35), c(185,0.6,0.4), c(180,0.55,0.45),
-      c(175,0.55,0.5), c(180,0.45,0.55), c(185,0.4,0.6), c(180,0.35,0.65), c(175,0.3,0.7),
+      c(175,0.5,0.2),   // Deep Teal
+      c(180,0.45,0.28), // Dark Teal
+      c(178,0.5,0.33),  // Teal
+      c(182,0.55,0.38), // Peacock
+      c(185,0.5,0.45),  // Ocean
+      c(180,0.45,0.52), // Aqua
+      c(175,0.4,0.58),  // Seafoam
+      c(180,0.35,0.65), // Light Teal
+      c(178,0.3,0.72),  // Pale Aqua
     ]},
     { label: 'Blues', colors: [
-      c(230,0.55,0.18), c(220,0.6,0.22), c(215,0.45,0.3), c(220,0.7,0.35), c(220,0.7,0.4),
-      c(215,0.6,0.45), c(210,0.55,0.5), c(200,0.6,0.55), c(200,0.5,0.6), c(200,0.4,0.72),
+      c(225,0.7,0.13),  // Midnight Navy
+      c(220,0.65,0.18), // Navy
+      c(225,0.6,0.25),  // Dark Navy
+      c(220,0.55,0.3),  // Indigo
+      c(215,0.5,0.35),  // Denim
+      c(220,0.65,0.4),  // Royal Blue
+      c(210,0.55,0.45), // Cobalt
+      c(215,0.5,0.5),   // Steel Blue
+      c(210,0.5,0.55),  // Slate Blue
+      c(205,0.55,0.6),  // Cornflower
+      c(200,0.5,0.65),  // Chambray
+      c(200,0.45,0.7),  // Powder Blue
+      c(195,0.4,0.75),  // Sky Blue
+      c(200,0.35,0.8),  // Light Blue
+      c(195,0.3,0.85),  // Ice Blue
     ]},
     { label: 'Purples & Lavender', colors: [
-      c(290,0.4,0.2), c(280,0.5,0.3), c(270,0.55,0.35), c(280,0.55,0.4), c(270,0.5,0.45),
-      c(275,0.45,0.5), c(280,0.35,0.55), c(270,0.4,0.6), c(270,0.35,0.65), c(270,0.3,0.72),
+      c(270,0.5,0.18),  // Deep Purple
+      c(280,0.45,0.25), // Dark Purple
+      c(275,0.5,0.32),  // Plum
+      c(270,0.55,0.38), // Purple
+      c(280,0.5,0.45),  // Amethyst
+      c(275,0.4,0.52),  // Violet
+      c(270,0.35,0.58), // Wisteria
+      c(268,0.3,0.65),  // Lavender
+      c(272,0.25,0.72), // Light Lavender
+      c(270,0.2,0.8),   // Pale Lilac
     ]},
-    { label: 'Pinks', colors: [
-      c(340,0.5,0.3), c(345,0.55,0.38), c(340,0.6,0.45), c(330,0.65,0.5), c(340,0.6,0.55),
-      c(345,0.5,0.6), c(350,0.4,0.65), c(345,0.35,0.7), c(340,0.3,0.75), c(350,0.25,0.8),
+    { label: 'Pinks & Rose', colors: [
+      c(335,0.5,0.25),  // Dark Rose
+      c(340,0.55,0.32), // Berry
+      c(342,0.5,0.38),  // Raspberry
+      c(338,0.45,0.45), // Rose
+      c(340,0.4,0.5),   // Dusty Rose
+      c(335,0.35,0.55), // Mauve
+      c(345,0.45,0.58), // Pink
+      c(350,0.35,0.65), // Blush
+      c(340,0.3,0.72),  // Light Pink
+      c(348,0.25,0.78), // Pastel Pink
     ]},
   ];
 }
@@ -1657,6 +1783,20 @@ app.customSwatchColor = async (itemId, which) => {
     } else {
       renderWardrobe();
     }
+  };
+
+  // Undo: reset sliders to original color
+  const origH = Math.round(current.hue), origS = Math.round(current.saturation * 100), origL = Math.round(current.lightness * 100);
+  document.getElementById('cp-undo').onclick = () => {
+    cpHue.value = origH; cpSat.value = origS; cpLight.value = origL;
+    updatePreview();
+  };
+
+  // Back: close without saving
+  document.getElementById('cp-back').onclick = () => {
+    document.getElementById('color-picker-overlay').classList.remove('open');
+    const imgEl = document.getElementById('cp-item-image');
+    if (imgEl) imgEl.innerHTML = '';
   };
 
   document.getElementById('color-picker-overlay').classList.add('open');
