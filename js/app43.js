@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46d';
+window.APP_VERSION = '46e';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -3776,13 +3776,6 @@ function renderOutfitCard(outfit, num) {
 }
 
 app.showOutfitDetail = async (id) => {
-  // Clear current detail to prevent flash of old items during navigation
-  const detailEl = document.getElementById('detail-overlay');
-  if (detailEl?.classList.contains('open')) {
-    const body = detailEl.querySelector('.detail-body-scroll');
-    if (body) body.style.opacity = '0';
-  }
-
   const outfit = outfits.find(o => o.id === id);
   if (!outfit) return;
   const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
@@ -5315,7 +5308,14 @@ function _setupSwipe(elementId, onSwipeRight, onSwipeLeft) {
 
 function openDetail(html) {
   const d = document.getElementById('detail-overlay');
-  // Parse HTML to separate the header from the body
+  const isAlreadyOpen = d.classList.contains('open');
+
+  // If navigating between details (already open), fade out first
+  if (isAlreadyOpen) {
+    d.style.opacity = '0';
+    d.style.transition = 'opacity 0.08s';
+  }
+
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   const header = tmp.querySelector('.detail-header');
@@ -5332,6 +5332,14 @@ function openDetail(html) {
   }
   d.classList.add('open');
   lazyLoadImages();
+
+  // Fade back in
+  if (isAlreadyOpen) {
+    requestAnimationFrame(() => {
+      d.style.opacity = '1';
+      setTimeout(() => { d.style.transition = ''; }, 100);
+    });
+  }
 }
 
 function closeDetail() {
