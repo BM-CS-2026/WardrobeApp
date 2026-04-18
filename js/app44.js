@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46l';
+window.APP_VERSION = '46m';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -2002,7 +2002,7 @@ app.generateOutfitsForChecked = async () => {
     }
 
     if (bestPalette) {
-      const results = generateOutfits(items, bestPalette, seedItem);
+      const results = generateOutfits(items, bestPalette, seedItem, outfitVibe);
       for (const r of results) {
         allResults.push({ ...r, seedItem, palette: bestPalette });
       }
@@ -2954,7 +2954,7 @@ app.runVibeOutfitGen = () => {
       }
     }
 
-    const results = generateOutfits(filteredItems, vibePalette, seeds);
+    const results = generateOutfits(filteredItems, vibePalette, seeds, outfitVibe);
 
     hideLoading();
 
@@ -4422,12 +4422,13 @@ app.applyOutfitFeedback = async (outfitId) => {
 
   // Strategy: generate full outfit set, then pick top 4 diverse ones
   // For category-specific feedback, shuffle alternatives in those categories
-  const results = generateOutfits(filteredItems, bestPalette);
+  const feedbackVibe = outfits.find(o => o.id === outfitId)?.vibe || outfitVibe;
+  const results = generateOutfits(filteredItems, bestPalette, null, feedbackVibe);
 
   // Also try with different palettes for variety
   const otherPalettes = palettes.filter(p => p.id !== bestPalette.id).slice(0, 3);
   for (const pal of otherPalettes) {
-    const moreResults = generateOutfits(filteredItems, pal);
+    const moreResults = generateOutfits(filteredItems, pal, null, feedbackVibe);
     results.push(...moreResults);
   }
 
@@ -5106,7 +5107,7 @@ app.runGenerator = () => {
   `;
 
   setTimeout(async () => {
-    generatorResults = generateOutfits(items, palette, seed);
+    generatorResults = generateOutfits(items, palette, seed, outfitVibe);
     await autoSaveOutfits(generatorResults);
     renderGeneratorResults();
   }, 50);
@@ -5286,7 +5287,13 @@ app.showReplaceItem = async (outfitId, itemIndex) => {
 
   const category = currentItem.category;
   const cat = CATEGORIES.find(c => c.id === category);
-  const alternatives = items.filter(i => i.category === category && i.id !== currentItemId);
+  const outfitItemIds = new Set(outfit.itemIds);
+  const outfitVibe = outfit.vibe;
+  const alternatives = items.filter(i =>
+    i.category === category &&
+    !outfitItemIds.has(i.id) &&
+    !(outfitVibe && i.excludeOccasions?.includes(outfitVibe))
+  );
 
   if (!alternatives.length) {
     openSheet(`

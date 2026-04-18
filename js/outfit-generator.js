@@ -5,7 +5,8 @@ const MAX_RESULTS = 4;
 const TOP_PER_CATEGORY = 8;
 
 // seedItem can be a single item OR an array of items
-export function generateOutfits(allItems, palette, seedItem = null) {
+// selectedVibe: string vibe id to filter out excluded items
+export function generateOutfits(allItems, palette, seedItem = null, selectedVibe = null) {
   const paletteColors = palette.colors;
   if (!paletteColors.length) return [];
 
@@ -20,8 +21,8 @@ export function generateOutfits(allItems, palette, seedItem = null) {
   for (const item of allItems) {
     if (seedIds.has(item.id)) continue;
     // Filter out items excluded for selected vibe/occasion
-    if (item.excludeOccasions?.length && allItems._selectedVibe) {
-      if (item.excludeOccasions.includes(allItems._selectedVibe)) continue;
+    if (selectedVibe && item.excludeOccasions?.length) {
+      if (item.excludeOccasions.includes(selectedVibe)) continue;
     }
     const catKey = TOP_CATEGORIES.includes(item.category) ? 'top' : item.category;
     if (!buckets[catKey]) buckets[catKey] = [];
