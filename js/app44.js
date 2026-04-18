@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46g';
+window.APP_VERSION = '46h';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -1350,24 +1350,81 @@ function generateColorAlternatives(current) {
 function colorName(c) {
   const h = c.hue, s = c.saturation, l = c.lightness;
   if (l < 0.12) return 'Black';
-  if (l > 0.9 && s < 0.1) return 'White';
+  if (l > 0.92 && s < 0.15) return 'White';
   if (s < 0.06) return l < 0.4 ? 'Charcoal' : l < 0.65 ? 'Gray' : 'Light Gray';
   if (s < 0.12 && (h < 20 || h > 340)) return l < 0.4 ? 'Dark Gray' : 'Gray';
 
-  let name = '';
-  if (h < 15 || h >= 345) name = 'Red';
-  else if (h < 40) name = 'Orange';
-  else if (h < 55) name = 'Yellow';
-  else if (h < 80) name = 'Olive';
-  else if (h < 160) name = 'Green';
-  else if (h < 195) name = 'Teal';
-  else if (h < 250) name = 'Blue';
-  else if (h < 290) name = 'Purple';
-  else if (h < 345) name = 'Pink';
+  // Warm hues (10-45): distinguish brown/tan/beige from orange
+  if (h >= 10 && h < 45) {
+    if (l > 0.85 && s < 0.4) return 'Cream';
+    if (l > 0.7 && s < 0.45) return 'Beige';
+    if (l > 0.55 && s < 0.5) return 'Tan';
+    if (l > 0.4 && s < 0.55) return 'Camel';
+    if (l <= 0.4 && s < 0.65) return l < 0.25 ? 'Dark Brown' : 'Brown';
+    // High saturation = actual orange
+    if (l < 0.3) return 'Rust';
+    if (l > 0.7) return 'Peach';
+    return 'Orange';
+  }
 
-  if (l < 0.3) return 'Dark ' + name;
-  if (l > 0.7) return 'Light ' + name;
-  return name;
+  // Yellow-gold range (45-60): distinguish khaki/cream from yellow
+  if (h >= 45 && h < 60) {
+    if (s < 0.4 && l > 0.7) return 'Cream';
+    if (s < 0.4 && l > 0.5) return 'Khaki';
+    if (s < 0.4) return 'Olive Tan';
+    if (l < 0.35) return 'Dark Gold';
+    if (l > 0.75) return 'Pale Yellow';
+    return 'Gold';
+  }
+
+  // Red (0-10 and 345+)
+  if (h < 10 || h >= 345) {
+    if (l < 0.25) return 'Burgundy';
+    if (l < 0.4) return 'Dark Red';
+    if (l > 0.7) return 'Pink';
+    return 'Red';
+  }
+
+  // Olive (60-80)
+  if (h < 80) {
+    if (l < 0.3) return 'Dark Olive';
+    if (l > 0.6) return 'Sage';
+    return 'Olive';
+  }
+
+  // Green (80-160)
+  if (h < 160) {
+    if (l < 0.25) return 'Forest Green';
+    if (l > 0.6) return 'Light Green';
+    return 'Green';
+  }
+
+  // Teal (160-195)
+  if (h < 195) {
+    if (l < 0.3) return 'Dark Teal';
+    return 'Teal';
+  }
+
+  // Blue (195-250)
+  if (h < 250) {
+    if (l < 0.2) return 'Navy';
+    if (l < 0.35) return 'Dark Blue';
+    if (l > 0.65) return 'Sky Blue';
+    return 'Blue';
+  }
+
+  // Purple (250-290)
+  if (h < 290) {
+    if (l < 0.3) return 'Dark Purple';
+    if (l > 0.65) return 'Lavender';
+    return 'Purple';
+  }
+
+  // Pink (290-345)
+  if (l < 0.3) return 'Plum';
+  if (s < 0.3) return 'Mauve';
+  if (l > 0.7) return 'Light Pink';
+  return 'Pink';
 }
 
 app.deleteSecondaryColor = async (itemId) => {
