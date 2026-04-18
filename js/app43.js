@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46c';
+window.APP_VERSION = '46d';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -160,6 +160,8 @@ async function processImageQueue() {
     updateAiProgressBar();
   }
   isProcessingQueue = false;
+  // Sync any changes that were suppressed during generation
+  await loadData();
 }
 
 // Find the current DOM card for an outfit (may have been re-rendered)
@@ -579,6 +581,8 @@ function startSyncIfConfigured() {
   db.setupSync(url, async (event, info) => {
     setSyncDot(event === 'error' ? 'error' : event);
     if (event === 'change' || event === 'paused') {
+      // Skip re-render if AI images are being generated (prevents flickering)
+      if (isProcessingQueue) return;
       await loadData();
       renderCurrentTab();
     }
