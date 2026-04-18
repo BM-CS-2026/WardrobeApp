@@ -1,5 +1,5 @@
 import { colorScore, paletteAffinity } from './color-engine.js';
-import { CATEGORIES } from './utils.js';
+import { CATEGORIES, TOP_CATEGORIES } from './utils.js';
 
 const MAX_RESULTS = 4;
 const TOP_PER_CATEGORY = 8;
@@ -15,11 +15,17 @@ export function generateOutfits(allItems, palette, seedItem = null) {
   const seedCats = new Set(seeds.map(s => s.category));
 
   // Partition by category, exclude seeds
+  // Merge shirt + button_down into a single "top" bucket for outfit generation
   const buckets = {};
   for (const item of allItems) {
     if (seedIds.has(item.id)) continue;
-    if (!buckets[item.category]) buckets[item.category] = [];
-    buckets[item.category].push(item);
+    // Filter out items excluded for selected vibe/occasion
+    if (item.excludeOccasions?.length && allItems._selectedVibe) {
+      if (item.excludeOccasions.includes(allItems._selectedVibe)) continue;
+    }
+    const catKey = TOP_CATEGORIES.includes(item.category) ? 'top' : item.category;
+    if (!buckets[catKey]) buckets[catKey] = [];
+    buckets[catKey].push(item);
   }
 
   // Pre-filter top items per category by affinity
@@ -28,21 +34,32 @@ export function generateOutfits(allItems, palette, seedItem = null) {
     buckets[cat] = buckets[cat].slice(0, TOP_PER_CATEGORY);
   }
 
-  // Determine required/optional slots (excluding seed categories)
-  const required = CATEGORIES.filter(c => c.required && !seedCats.has(c.id));
-  const optional = CATEGORIES.filter(c => !c.required && !seedCats.has(c.id));
+  // Check if seed is a top (shirt/button_down)
+  const seedIsTop = seeds.some(s => TOP_CATEGORIES.includes(s.category));
 
-  // Build slot arrays: shoes are ALWAYS required, belt favored
+  // Build slots: top (shirt or button_down), pants, shoes required; belt, jacket optional
   const slots = [];
+
+  // Top slot (required unless seed is a top)
+  if (!seedIsTop) {
+    const tops = buckets['top'] || [];
+    if (tops.length) slots.push(tops);
+    else return [];
+  }
+
+  // Other required categories (pants, shoes) excluding seed categories and top
+  const required = CATEGORIES.filter(c => c.required && !seedCats.has(c.id) && !TOP_CATEGORIES.includes(c.id));
   for (const cat of required) {
     const items = buckets[cat.id] || [];
-    if (!items.length) return []; // can't form outfit
+    if (!items.length) return [];
     slots.push(items);
   }
+
+  // Optional: shoes always required, belt favored, jacket optional
+  const optional = CATEGORIES.filter(c => !c.required && !seedCats.has(c.id));
   for (const cat of optional) {
     const catItems = buckets[cat.id] || [];
     if (cat.id === 'shoes' && catItems.length > 0) {
-      // Shoes are always required in outfits
       slots.push(catItems);
     } else if (cat.id === 'belt' && catItems.length > 0) {
       slots.push([...catItems, null]);

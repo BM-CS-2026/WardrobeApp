@@ -20,7 +20,7 @@ IMPORTANT RULES:
 - The boundingBox must tightly fit the specific garment, NOT the whole person.
 
 For each item provide:
-- category: one of "shirt", "pants", "shoes", "belt", "jacket"
+- category: one of "shirt" (for t-shirts, polo shirts, knit tops), "button_down" (for button-down/dress shirts with collar and buttons), "pants", "shoes", "belt", "jacket"
 - description: DETAILED description including: exact color (be very specific — e.g. "charcoal" not just "gray", "burgundy" not just "red"), material/fabric (cotton, wool, linen, suede, leather, denim, polyester, knit, etc.), texture (ribbed, smooth, woven, matte, glossy), fit (slim, relaxed, straight-leg, oversized), and any unique features (buttons, zipper, collar style, pattern, stitching, buckle type)
 - boundingBox: normalized coordinates (0-1) as {x, y, width, height} — this MUST tightly crop just this garment
 
@@ -68,7 +68,7 @@ Example for a full outfit:
   const garments = JSON.parse(match[0]);
 
   // Validate and normalize
-  const validCategories = ['shirt', 'pants', 'shoes', 'belt', 'jacket'];
+  const validCategories = ['shirt', 'button_down', 'pants', 'shoes', 'belt', 'jacket'];
   return garments.filter(g => {
     if (!g.category || !validCategories.includes(g.category)) return false;
     if (!g.boundingBox) return false;

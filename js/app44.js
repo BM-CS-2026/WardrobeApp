@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '45d';
+window.APP_VERSION = '46a';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -389,6 +389,9 @@ async function appInit() {
   // Daily auto-backup push
   scheduleDailyBackup();
 
+  // One-time: split shirts into shirt vs button_down
+  await splitShirtCategories();
+
   // Auto-fix colors if many items have gray dominant (one-time)
   autoFixColorsIfNeeded();
 
@@ -511,6 +514,32 @@ async function autoFixColorsIfNeeded() {
       renderCurrentTab();
     }
   }, 3000);
+}
+
+async function splitShirtCategories() {
+  const SPLIT_KEY = 'shirts_split_v1';
+  if (localStorage.getItem(SPLIT_KEY)) return;
+
+  const buttonDownKeywords = ['button-down', 'button down', 'dress shirt', 'oxford', 'poplin', 'broadcloth', 'chambray', 'denim shirt', 'camp shirt', 'camp collar', 'spread collar', 'pointed collar', 'button-front', 'snap buttons', 'long-sleeve button', 'short-sleeve button'];
+  let updated = 0;
+
+  for (const item of items) {
+    if (item.category !== 'shirt') continue;
+    const lower = item.name.toLowerCase();
+    const isButtonDown = buttonDownKeywords.some(kw => lower.includes(kw));
+    if (isButtonDown) {
+      item.category = 'button_down';
+      await db.putItem(item);
+      updated++;
+    }
+  }
+
+  localStorage.setItem(SPLIT_KEY, '1');
+  if (updated > 0) {
+    console.log(`[Split] Moved ${updated} items to button_down category`);
+    await loadData();
+    renderCurrentTab();
+  }
 }
 
 function scheduleDailyBackup() {
@@ -2737,47 +2766,42 @@ app.showItemDetail = async (id) => {
       </div>
       ${imgSrc ? `<img src="${imgSrc}" class="detail-image zoomable-img" onclick="app.zoomImage(event)">` : ''}
 
-      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:16px">
-        <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Description (edit to correct)</div>
-        <textarea id="item-name-edit" rows="2" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit;resize:vertical">${esc(item.name)}</textarea>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-sm btn-primary" style="flex:1" onclick="app.saveItemName('${item.id}')">Save Description</button>
-          <button class="btn btn-sm btn-outline" style="flex:1" onclick="app.reanalyzeItem('${item.id}')">🔄 Re-analyze with AI</button>
-        </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn btn-primary" style="flex:2" onclick="app.generateFromItem('${item.id}')">✨ Generate Outfits</button>
+        <button class="btn btn-outline" style="flex:1" onclick="app.pickSecondItem('${item.id}')">+ With Another</button>
       </div>
 
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
         <span style="padding:5px 12px;background:var(--bg);border-radius:16px;font-size:13px">${CATEGORIES.find(c => c.id === item.category)?.icon || ''} ${CATEGORIES.find(c => c.id === item.category)?.name || ''}</span>
+        ${cp ? `
+          <div style="display:flex;gap:6px;align-items:center;cursor:pointer" onclick="app.showColorPicker('${item.id}','dominant')">
+            <div class="swatch" style="background:${hslToCss(cp.dominantColor)};border:1px solid var(--border)"></div>
+            <span style="font-size:11px;color:var(--text-secondary)">${colorName(cp.dominantColor)}</span>
+          </div>
+        ` : ''}
         <span style="margin-left:auto;font-size:12px;color:var(--text-secondary)">${new Date(item.dateAdded).toLocaleDateString()}</span>
       </div>
 
-      ${item.styleTags?.length ? `
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
-          ${item.styleTags.map(t => `<span class="tag active" style="cursor:default">${t}</span>`).join('')}
+      <!-- Occasion exclusions -->
+      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Exclude from occasions:</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${VIBES.map(v => `
+            <span class="tag ${(item.excludeOccasions || []).includes(v.id) ? 'active' : ''}" style="cursor:pointer;font-size:11px" onclick="app.toggleExcludeOccasion('${item.id}','${v.id}')">${v.icon} ${v.name}</span>
+          `).join('')}
         </div>
-      ` : ''}
+      </div>
 
-      ${cp ? `
-        <div class="section-title">Colors <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">(tap to change)</span></div>
-        <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px">
-          <div style="text-align:center;cursor:pointer" onclick="app.showColorPicker('${item.id}','dominant')">
-            <div class="swatch lg" style="background:${hslToCss(cp.dominantColor)};border:2px solid var(--border)"></div>
-            <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Dominant</div>
-            <div style="font-size:10px;color:var(--text-secondary)">${colorName(cp.dominantColor)}</div>
-          </div>
-          ${hasDistinctSecondary(cp) ? `
-            <div style="text-align:center;cursor:pointer" onclick="app.showColorPicker('${item.id}','secondary')">
-              <div class="swatch lg" style="background:${hslToCss(cp.secondaryColors[0])};border:2px solid var(--border)"></div>
-              <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Secondary</div>
-              <div style="font-size:10px;color:var(--text-secondary)">${colorName(cp.secondaryColors[0])}</div>
-            </div>
-          ` : ''}
+      <div style="background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Description (edit to correct)</div>
+        <textarea id="item-name-edit" rows="2" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;resize:vertical">${esc(item.name)}</textarea>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button class="btn btn-sm btn-primary" style="flex:1" onclick="app.saveItemName('${item.id}')">Save</button>
+          <button class="btn btn-sm btn-outline" style="flex:1" onclick="app.reanalyzeItem('${item.id}')">🔄 Re-analyze</button>
         </div>
-      ` : ''}
+      </div>
 
-      <button class="btn btn-primary" onclick="app.generateFromItem('${item.id}')">✨ Generate Outfits</button>
-      <button class="btn btn-outline" style="margin-top:8px" onclick="app.pickSecondItem('${item.id}')">+ Add Another Item & Generate</button>
-      ${cp ? `<button class="btn btn-outline" style="margin-top:8px" onclick="app.showColorMatching('${item.id}')">🎨 Potential Color Matching</button>` : ''}
+      ${cp ? `<button class="btn btn-outline btn-sm" style="margin-bottom:8px" onclick="app.showColorMatching('${item.id}')">🎨 Color Matching</button>` : ''}
     </div>
   `);
 
@@ -2850,6 +2874,17 @@ app.saveItemName = async (id) => {
   await db.putItem(item);
   app.showItemDetail(id);
   renderWardrobe();
+};
+
+app.toggleExcludeOccasion = async (itemId, vibeId) => {
+  const item = items.find(i => i.id === itemId);
+  if (!item) return;
+  if (!item.excludeOccasions) item.excludeOccasions = [];
+  const idx = item.excludeOccasions.indexOf(vibeId);
+  if (idx >= 0) item.excludeOccasions.splice(idx, 1);
+  else item.excludeOccasions.push(vibeId);
+  await db.putItem(item);
+  app.showItemDetail(itemId);
 };
 
 app.reanalyzeItem = async (id) => {
@@ -3738,6 +3773,13 @@ function renderOutfitCard(outfit, num) {
 }
 
 app.showOutfitDetail = async (id) => {
+  // Clear current detail to prevent flash of old items during navigation
+  const detailEl = document.getElementById('detail-overlay');
+  if (detailEl?.classList.contains('open')) {
+    const body = detailEl.querySelector('.detail-body-scroll');
+    if (body) body.style.opacity = '0';
+  }
+
   const outfit = outfits.find(o => o.id === id);
   if (!outfit) return;
   const oi = (outfit.itemIds || []).map(id => items.find(i => i.id === id)).filter(Boolean);
@@ -3809,17 +3851,34 @@ app.showOutfitDetail = async (id) => {
                     <div class="cat">${cat?.name || ''}</div>
                   </div>
                 </div>
-                <div style="font-size:11px;color:var(--accent);flex-shrink:0;cursor:pointer" onclick="app.showReplaceItem('${outfit.id}', ${idx})">Replace ›</div>
+                <div style="display:flex;gap:8px;flex-shrink:0">
+                  <span style="font-size:11px;color:var(--accent);cursor:pointer" onclick="app.showReplaceItem('${outfit.id}', ${idx})">Replace</span>
+                  <span style="font-size:11px;color:var(--danger);cursor:pointer" onclick="app.removeItemFromOutfit('${outfit.id}', ${idx})">Without</span>
+                </div>
               </div>
             `;
           }).join('')}
-          ${(() => {
-            const presentCats = new Set(oi.map(i => i.category));
-            const missing = CATEGORIES.filter(c => !presentCats.has(c.id));
-            if (!missing.length) return '';
-            return '<div style="margin-top:8px;padding:8px 10px;background:var(--accent-light);border-radius:8px;font-size:12px;color:var(--accent)">Missing: ' + missing.map(c => c.icon + ' ' + c.name).join(', ') + ' — regenerate to include them</div>';
-          })()}
         </div>
+      </div>
+
+      <!-- Weather -->
+      <div id="outfit-weather" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:12px;font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:8px">
+        <span>🌡️</span>
+        <span id="weather-text">Checking weather...</span>
+        <select id="weather-override" style="margin-left:auto;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text1)">
+          <option value="auto">Auto</option>
+          <option value="hot">☀️ Hot</option>
+          <option value="warm">🌤️ Warm</option>
+          <option value="mild">⛅ Mild</option>
+          <option value="cool">🌥️ Cool</option>
+          <option value="cold">❄️ Cold</option>
+          <option value="rainy">🌧️ Rainy</option>
+        </select>
+      </div>
+
+      <!-- Complaint / Style Learning -->
+      <div style="margin-bottom:12px">
+        <button class="btn btn-sm btn-outline" style="width:100%" onclick="app.showOutfitComplaint('${outfit.id}')">🗣️ Something wrong with this look?</button>
       </div>
 
       <div class="divider"></div>
@@ -3893,6 +3952,97 @@ app.showOutfitDetail = async (id) => {
   // Swipe navigation for outfits
   _setupSwipe('outfit-detail-swipe', prevOutfitId ? () => app.showOutfitDetail(prevOutfitId) : null, nextOutfitId ? () => app.showOutfitDetail(nextOutfitId) : null);
 };
+
+// Remove an item type from outfit ("Without" button)
+app.removeItemFromOutfit = async (outfitId, itemIdx) => {
+  const outfit = outfits.find(o => o.id === outfitId);
+  if (!outfit) return;
+  const removedItem = items.find(i => i.id === outfit.itemIds[itemIdx]);
+  const cat = CATEGORIES.find(c => c.id === removedItem?.category);
+  if (!confirm(`Remove ${cat?.name || 'this item'} from this outfit?`)) return;
+
+  outfit.itemIds.splice(itemIdx, 1);
+  outfit.aiImageId = null; // will need new AI image
+  await db.putOutfit(outfit);
+  app.showOutfitDetail(outfitId);
+};
+
+// Style complaint/learning system
+app.showOutfitComplaint = (outfitId) => {
+  openSheet(`
+    <h2>What's wrong with this look?</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Tell me what you don't like. I'll learn your preferences for future outfits.</p>
+    <textarea id="style-complaint" rows="4" placeholder="e.g. The shoes don't match the formality, I don't like dark pants with dark shirts, the belt feels unnecessary..." style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit;resize:vertical"></textarea>
+    <button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="app.saveStyleComplaint('${outfitId}')">Save Feedback & Learn</button>
+    <button class="btn btn-secondary" style="margin-top:8px;width:100%" onclick="closeSheet()">Cancel</button>
+  `);
+};
+
+app.saveStyleComplaint = async (outfitId) => {
+  const text = document.getElementById('style-complaint')?.value?.trim();
+  if (!text) { alert('Please describe what you don\'t like.'); return; }
+
+  // Store style preferences in settings
+  const prefs = (await db.getSetting('style_preferences')) || [];
+  prefs.push({
+    date: new Date().toISOString(),
+    outfitId,
+    feedback: text,
+  });
+  // Keep last 50 preferences
+  while (prefs.length > 50) prefs.shift();
+  await db.putSetting('style_preferences', prefs);
+
+  closeSheet();
+  alert('Got it! I\'ll use this feedback to improve future outfit suggestions.');
+};
+
+// Weather auto-detection
+async function fetchWeather() {
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, () => reject('no location'), { timeout: 5000 });
+    });
+    const { latitude: lat, longitude: lon } = pos.coords;
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+    const data = await res.json();
+    const temp = data.current_weather?.temperature;
+    const code = data.current_weather?.weathercode;
+    if (temp == null) return null;
+
+    let condition = 'clear';
+    if ([61,63,65,66,67,80,81,82].includes(code)) condition = 'rainy';
+    else if ([71,73,75,77,85,86].includes(code)) condition = 'snow';
+    else if ([51,53,55].includes(code)) condition = 'drizzle';
+    else if ([95,96,99].includes(code)) condition = 'thunderstorm';
+    else if ([45,48].includes(code)) condition = 'foggy';
+
+    let category = 'mild';
+    if (temp >= 30) category = 'hot';
+    else if (temp >= 24) category = 'warm';
+    else if (temp >= 18) category = 'mild';
+    else if (temp >= 10) category = 'cool';
+    else category = 'cold';
+    if (condition === 'rainy' || condition === 'drizzle' || condition === 'thunderstorm') category = 'rainy';
+
+    const summary = `${Math.round(temp)}°C, ${condition}. ${category === 'hot' ? 'Light fabrics recommended' : category === 'cold' ? 'Layer up' : category === 'rainy' ? 'Bring a waterproof layer' : 'Comfortable for most outfits'}.`;
+    return { temp, condition, category, summary };
+  } catch { return null; }
+}
+
+// Auto-fill weather in outfit detail
+setTimeout(async () => {
+  const el = document.getElementById('weather-text');
+  if (!el) return;
+  const w = await fetchWeather();
+  if (w) {
+    el.textContent = w.summary;
+    const sel = document.getElementById('weather-override');
+    if (sel) sel.value = w.category;
+  } else {
+    el.textContent = 'Weather unavailable. Select manually.';
+  }
+}, 500);
 
 app.applyOutfitFeedback = async (outfitId) => {
   const feedback = document.getElementById('outfit-feedback-text')?.value?.trim();

@@ -78,12 +78,16 @@ export function scoreColor(score) {
 }
 
 export const CATEGORIES = [
-  { id: 'shirt', name: 'Shirt', icon: '👔', required: true },
+  { id: 'shirt', name: 'T-Shirt / Knit', icon: '👕', required: true },
+  { id: 'button_down', name: 'Button-Down Shirt', icon: '👔', required: true },
   { id: 'pants', name: 'Pants', icon: '👖', required: true },
   { id: 'shoes', name: 'Shoes', icon: '👟', required: true },
   { id: 'belt', name: 'Belt', icon: '🪢', required: false },
   { id: 'jacket', name: 'Jacket', icon: '🧥', required: false },
 ];
+
+// shirt and button_down are interchangeable in outfit generation (one top required)
+export const TOP_CATEGORIES = ['shirt', 'button_down'];
 
 export const STYLE_TAGS = ['casual', 'formal', 'business', 'sporty', 'streetwear', 'evening'];
 
