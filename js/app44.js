@@ -7,7 +7,7 @@ import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES
 
 // ── Global app object (must be first) ──
 window.app = {};
-window.APP_VERSION = '46e';
+window.APP_VERSION = '46f';
 console.log('[App] Version ' + window.APP_VERSION + ' loaded');
 
 // ── State ──
@@ -1528,13 +1528,33 @@ app.pickSwatchColor = async (itemId, which, groupLabel, colorIdx) => {
   }
 };
 
-app.customSwatchColor = (itemId, which) => {
+app.customSwatchColor = async (itemId, which) => {
   const item = items.find(i => i.id === itemId);
   if (!item?.colorProfile) return;
   const current = which === 'dominant' ? item.colorProfile.dominantColor : item.colorProfile.secondaryColors?.[0];
   if (!current) return;
 
-  // Use the app's existing color picker
+  // Load item image
+  let imgSrc = '';
+  if (item.imageId) {
+    const data = await db.loadImage(item.imageId);
+    if (data) imgSrc = (typeof data === 'string') ? data : URL.createObjectURL(data);
+  }
+
+  // Inject item image into the picker (above the preview swatch)
+  const previewEl = document.getElementById('cp-preview');
+  let imgContainer = document.getElementById('cp-item-image');
+  if (!imgContainer) {
+    imgContainer = document.createElement('div');
+    imgContainer.id = 'cp-item-image';
+    previewEl.parentNode.insertBefore(imgContainer, previewEl);
+  }
+  if (imgSrc) {
+    imgContainer.innerHTML = `<img src="${imgSrc}" style="width:100%;max-height:180px;object-fit:contain;border-radius:8px;margin-bottom:10px;display:block">`;
+  } else {
+    imgContainer.innerHTML = '';
+  }
+
   const cpHue = document.getElementById('cp-hue');
   const cpSat = document.getElementById('cp-sat');
   const cpLight = document.getElementById('cp-light');
@@ -1542,7 +1562,6 @@ app.customSwatchColor = (itemId, which) => {
   cpSat.value = Math.round(current.saturation * 100);
   cpLight.value = Math.round(current.lightness * 100);
 
-  // Update preview
   const updatePreview = () => {
     const h = cpHue.value, s = cpSat.value, l = cpLight.value;
     document.getElementById('cp-preview').style.background = `hsl(${h},${s}%,${l}%)`;
@@ -1572,6 +1591,9 @@ app.customSwatchColor = (itemId, which) => {
     }
     await db.putItem(item);
     document.getElementById('color-picker-overlay').classList.remove('open');
+    // Clean up injected image
+    const imgEl = document.getElementById('cp-item-image');
+    if (imgEl) imgEl.innerHTML = '';
     closeSheet();
     if (document.getElementById('detail-overlay')?.classList.contains('open')) {
       app.showItemDetail(itemId);
