@@ -1,7 +1,7 @@
 import * as db from './db42.js';
 import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=20';
 import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=20';
-import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=20';
+import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=21';
 import { analyzeOutfitPhoto, generateOutfitImage } from './cloud-ai.js?v=20';
 import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES, VIBES } from './utils.js?v=20';
 
@@ -107,6 +107,68 @@ function dataUrlToBlob(dataUrl) {
 // ── AI Outfit Image Generation ──
 function outfitImageCacheKey(itemIds) {
   return 'outfit-img-' + [...itemIds].sort().join('-');
+}
+
+// ── Per-day outfit color history ──
+// Tracks the dominant colors of non-seed items already shown for a given seed
+// today, so a second "Generate" for the same item produces a visibly different
+// palette instead of recycling the same color combos.
+const OUTFIT_HISTORY_KEY = 'outfit-history-v1';
+
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function readOutfitHistory() {
+  try {
+    const raw = localStorage.getItem(OUTFIT_HISTORY_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Drop anything not from today — keeps storage tiny and avoids stale bias.
+    const today = todayKey();
+    return parsed.date === today ? (parsed.bySeed || {}) : {};
+  } catch { return {}; }
+}
+
+function writeOutfitHistory(bySeed) {
+  try {
+    localStorage.setItem(OUTFIT_HISTORY_KEY, JSON.stringify({ date: todayKey(), bySeed }));
+  } catch {}
+}
+
+function seedHistoryKey(seedItemOrArr) {
+  const arr = Array.isArray(seedItemOrArr) ? seedItemOrArr : [seedItemOrArr];
+  return arr.filter(Boolean).map(s => s.id).sort().join('|');
+}
+
+function getExcludeColorsForSeed(seedItemOrArr) {
+  const key = seedHistoryKey(seedItemOrArr);
+  if (!key) return [];
+  const hist = readOutfitHistory();
+  return hist[key] || [];
+}
+
+function appendOutfitHistory(seedItemOrArr, results) {
+  const key = seedHistoryKey(seedItemOrArr);
+  if (!key) return;
+  const seedIds = new Set(
+    (Array.isArray(seedItemOrArr) ? seedItemOrArr : [seedItemOrArr]).filter(Boolean).map(s => s.id)
+  );
+  const newColors = [];
+  for (const r of results) {
+    for (const it of r.items) {
+      if (seedIds.has(it.id)) continue;
+      const c = it.colorProfile?.dominantColor;
+      if (c) newColors.push({ hue: c.hue, saturation: c.saturation, lightness: c.lightness });
+    }
+  }
+  if (!newColors.length) return;
+  const hist = readOutfitHistory();
+  const existing = hist[key] || [];
+  // Cap history to avoid pathological growth — last ~60 colors is plenty.
+  hist[key] = existing.concat(newColors).slice(-60);
+  writeOutfitHistory(hist);
 }
 
 const imageGenQueue = [];
@@ -2905,10 +2967,12 @@ app.runVibeOutfitGen = () => {
   if (el) app._outfitGuidance = el.value;
 
   closeSheet();
-  showLoading('Generating outfits...');
+  showLoading('Picking 5 different outfits...');
 
   const seeds = Array.isArray(outfitSeedItem) ? outfitSeedItem : [outfitSeedItem];
 
+  // Deliberate delay — the diversity pass is fast, but the user wants to see
+  // that real thought is going in. Give the spinner room to breathe.
   setTimeout(() => {
     const vibePalette = { id: 'vibe-temp', name: vibe.name, colors: vibe.colors, harmonyType: 'analogous', isBuiltIn: false };
 
@@ -2954,11 +3018,13 @@ app.runVibeOutfitGen = () => {
       }
     }
 
-    const results = generateOutfits(filteredItems, vibePalette, seeds, outfitVibe);
+    const excludeColors = getExcludeColorsForSeed(seeds);
+    const results = generateOutfits(filteredItems, vibePalette, seeds, outfitVibe, excludeColors);
 
     hideLoading();
 
     if (results.length > 0) {
+      appendOutfitHistory(seeds, results);
       app._genResults = results;
       showGeneratedOutfitsSheet(results, seeds, vibe);
     } else {
@@ -2970,7 +3036,7 @@ app.runVibeOutfitGen = () => {
         <button class="btn btn-primary" onclick="app.closeSheetAndRender()">OK</button>
       `);
     }
-  }, 50);
+  }, 900);
 };
 
 // ── Item Detail ──

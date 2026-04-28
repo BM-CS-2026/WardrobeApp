@@ -1,26 +1,26 @@
 import { colorScore, paletteAffinity } from './color-engine.js';
-import { CATEGORIES, TOP_CATEGORIES } from './utils.js';
+import { CATEGORIES, TOP_CATEGORIES, hueDistance, hslDistance } from './utils.js';
 
-const MAX_RESULTS = 4;
-const TOP_PER_CATEGORY = 8;
+const MAX_RESULTS = 5;
+const TOP_PER_CATEGORY = 14;
+const COMBO_CAP = 12000;
 
 // seedItem can be a single item OR an array of items
-// selectedVibe: string vibe id to filter out excluded items
-export function generateOutfits(allItems, palette, seedItem = null, selectedVibe = null) {
+// selectedVibe: vibe id used to filter out excluded items
+// excludeColors: array of HSL colors {hue,saturation,lightness} from prior batches
+//   for the same seed/day — outfits whose non-seed items match these get penalized
+//   so that "Generate again" produces visibly different palettes.
+export function generateOutfits(allItems, palette, seedItem = null, selectedVibe = null, excludeColors = []) {
   const paletteColors = palette.colors;
   if (!paletteColors.length) return [];
 
-  // Normalize seeds to array
   const seeds = seedItem ? (Array.isArray(seedItem) ? seedItem : [seedItem]) : [];
   const seedIds = new Set(seeds.map(s => s.id));
   const seedCats = new Set(seeds.map(s => s.category));
 
-  // Partition by category, exclude seeds
-  // Merge shirt + button_down into a single "top" bucket for outfit generation
   const buckets = {};
   for (const item of allItems) {
     if (seedIds.has(item.id)) continue;
-    // Filter out items excluded for selected vibe/occasion
     if (selectedVibe && item.excludeOccasions?.length) {
       if (item.excludeOccasions.includes(selectedVibe)) continue;
     }
@@ -35,20 +35,15 @@ export function generateOutfits(allItems, palette, seedItem = null, selectedVibe
     buckets[cat] = buckets[cat].slice(0, TOP_PER_CATEGORY);
   }
 
-  // Check if seed is a top (shirt/button_down)
   const seedIsTop = seeds.some(s => TOP_CATEGORIES.includes(s.category));
-
-  // Build slots: top (shirt or button_down), pants, shoes required; belt, jacket optional
   const slots = [];
 
-  // Top slot (required unless seed is a top)
   if (!seedIsTop) {
     const tops = buckets['top'] || [];
     if (tops.length) slots.push(tops);
     else return [];
   }
 
-  // Other required categories (pants, shoes) excluding seed categories and top
   const required = CATEGORIES.filter(c => c.required && !seedCats.has(c.id) && !TOP_CATEGORIES.includes(c.id));
   for (const cat of required) {
     const items = buckets[cat.id] || [];
@@ -56,7 +51,6 @@ export function generateOutfits(allItems, palette, seedItem = null, selectedVibe
     slots.push(items);
   }
 
-  // Optional: shoes always required, belt favored, jacket optional
   const optional = CATEGORIES.filter(c => !c.required && !seedCats.has(c.id));
   for (const cat of optional) {
     const catItems = buckets[cat.id] || [];
@@ -69,21 +63,19 @@ export function generateOutfits(allItems, palette, seedItem = null, selectedVibe
     }
   }
 
-  // Cartesian product (capped to prevent explosion)
   let combos = [[]];
   for (const slot of slots) {
     const next = [];
     for (const combo of combos) {
       for (const option of slot) {
         next.push([...combo, option]);
-        if (next.length > 5000) break; // safety cap
+        if (next.length > COMBO_CAP) break;
       }
-      if (next.length > 5000) break;
+      if (next.length > COMBO_CAP) break;
     }
     combos = next;
   }
 
-  // Score each
   const candidates = combos.map(combo => {
     const items = seeds.length ? [...seeds, ...combo.filter(Boolean)] : combo.filter(Boolean);
     if (!items.length) return null;
@@ -93,34 +85,111 @@ export function generateOutfits(allItems, palette, seedItem = null, selectedVibe
     const style = computeStyleScore(items);
     const overall = cs * 0.5 + completeness * 0.3 + style * 0.2;
 
-    return { items, colorScore: cs, completenessScore: completeness, styleScore: style, overallScore: overall };
+    // Penalty for any non-seed item whose color is close to a previously-used color.
+    // We want each "Generate again" to look palette-fresh, not just item-fresh.
+    let historyPenalty = 0;
+    if (excludeColors.length) {
+      const nonSeedColors = items
+        .filter(i => !seedIds.has(i.id) && i.colorProfile?.dominantColor)
+        .map(i => i.colorProfile.dominantColor);
+      for (const c of nonSeedColors) {
+        const closest = Math.min(...excludeColors.map(e => hslDistance(c, e)));
+        if (closest < 0.12) historyPenalty += 0.18;
+        else if (closest < 0.22) historyPenalty += 0.08;
+      }
+    }
+
+    return {
+      items,
+      colorScore: cs,
+      completenessScore: completeness,
+      styleScore: style,
+      overallScore: Math.max(0, overall - historyPenalty),
+      _baseScore: overall,
+    };
   }).filter(Boolean);
 
   candidates.sort((a, b) => b.overallScore - a.overallScore);
+  if (!candidates.length) return [];
 
-  // Enforce diversity: no shared non-seed items between outfits
-  const diverse = [];
-  for (const c of candidates) {
-    if (diverse.length >= MAX_RESULTS) break;
-    const cNonSeedIds = new Set(c.items.filter(i => !seedIds.has(i.id)).map(i => i.id));
-    const tooSimilar = diverse.some(d => {
-      const dNonSeedIds = new Set(d.items.filter(i => !seedIds.has(i.id)).map(i => i.id));
-      // Check if ANY non-seed item is shared
-      for (const id of cNonSeedIds) { if (dNonSeedIds.has(id)) return true; }
-      return false;
-    });
-    if (!tooSimilar) diverse.push(c);
-  }
+  // Greedy diversity selection: pick the top candidate, then iteratively pick
+  // the candidate that scores highest after subtracting a similarity penalty
+  // against everything already picked. Similarity blends two signals:
+  //   (a) shared non-seed items
+  //   (b) closeness of non-seed dominant hues
+  // This makes the 5 results visibly different in color, not just different items.
+  const picked = [];
+  const remaining = candidates.slice();
 
-  // If diversity filter was too strict, fill remaining slots from top candidates
-  if (diverse.length < MAX_RESULTS) {
-    for (const c of candidates) {
-      if (diverse.length >= MAX_RESULTS) break;
-      if (!diverse.includes(c)) diverse.push(c);
+  picked.push(remaining.shift());
+
+  while (picked.length < MAX_RESULTS && remaining.length) {
+    let bestIdx = 0;
+    let bestAdj = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const c = remaining[i];
+      let maxSim = 0;
+      for (const p of picked) {
+        const sim = outfitSimilarity(c, p, seedIds);
+        if (sim > maxSim) maxSim = sim;
+      }
+      // Strong penalty for similarity — we'd rather take a slightly lower-scoring
+      // outfit than another near-duplicate.
+      const adj = c.overallScore - 0.55 * maxSim;
+      if (adj > bestAdj) { bestAdj = adj; bestIdx = i; }
     }
+    picked.push(remaining.splice(bestIdx, 1)[0]);
   }
 
-  return diverse;
+  // Strip helper field
+  return picked.map(p => {
+    const { _baseScore, ...rest } = p;
+    return rest;
+  });
+}
+
+// Similarity between two candidate outfits in [0,1].
+// 1 = identical/near-duplicate, 0 = very different.
+function outfitSimilarity(a, b, seedIds) {
+  const aNon = a.items.filter(i => !seedIds.has(i.id));
+  const bNon = b.items.filter(i => !seedIds.has(i.id));
+  if (!aNon.length || !bNon.length) return 0;
+
+  // Item overlap component
+  const aIds = new Set(aNon.map(i => i.id));
+  let shared = 0;
+  for (const i of bNon) if (aIds.has(i.id)) shared++;
+  const itemSim = shared / Math.max(aNon.length, bNon.length);
+
+  // Hue closeness component — average min-hue-distance, normalized to [0,1].
+  const aHues = aNon.map(i => i.colorProfile?.dominantColor?.hue).filter(h => h !== undefined);
+  const bHues = bNon.map(i => i.colorProfile?.dominantColor?.hue).filter(h => h !== undefined);
+  let hueSim = 0;
+  if (aHues.length && bHues.length) {
+    const dists = [];
+    for (const h of aHues) {
+      const minD = Math.min(...bHues.map(bh => hueDistance(h, bh)));
+      dists.push(minD);
+    }
+    const avgDist = dists.reduce((s, d) => s + d, 0) / dists.length; // 0..180
+    // Outfits whose hues are within ~25° on average are "similar"
+    hueSim = Math.max(0, 1 - avgDist / 60);
+  }
+
+  // Lightness/saturation closeness — distinguishes "all dark" vs "all light"
+  // outfits even when hues happen to coincide (e.g. lots of neutrals).
+  const aTones = aNon.map(i => i.colorProfile?.dominantColor).filter(Boolean);
+  const bTones = bNon.map(i => i.colorProfile?.dominantColor).filter(Boolean);
+  let toneSim = 0;
+  if (aTones.length && bTones.length) {
+    const aL = aTones.reduce((s, c) => s + c.lightness, 0) / aTones.length;
+    const bL = bTones.reduce((s, c) => s + c.lightness, 0) / bTones.length;
+    const aS = aTones.reduce((s, c) => s + c.saturation, 0) / aTones.length;
+    const bS = bTones.reduce((s, c) => s + c.saturation, 0) / bTones.length;
+    toneSim = Math.max(0, 1 - (Math.abs(aL - bL) + Math.abs(aS - bS)));
+  }
+
+  return Math.max(itemSim, 0.6 * hueSim + 0.4 * toneSim);
 }
 
 export function computeCompleteness(items) {
