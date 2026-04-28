@@ -1,7 +1,7 @@
 import * as db from './db42.js';
 import { createClothingItem, createColorPalette, createOutfit } from './models.js?v=20';
 import { extractColorProfile, extractFromRegion, paletteAffinity, colorScore } from './color-engine.js?v=20';
-import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=21';
+import { generateOutfits, computeCompleteness, computeStyleScore } from './outfit-generator.js?v=22';
 import { analyzeOutfitPhoto, generateOutfitImage } from './cloud-ai.js?v=20';
 import { hslToCss, generateId, scoreColor, CATEGORIES, STYLE_TAGS, HARMONY_TYPES, VIBES } from './utils.js?v=20';
 

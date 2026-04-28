@@ -112,33 +112,61 @@ export function generateOutfits(allItems, palette, seedItem = null, selectedVibe
   candidates.sort((a, b) => b.overallScore - a.overallScore);
   if (!candidates.length) return [];
 
-  // Greedy diversity selection: pick the top candidate, then iteratively pick
-  // the candidate that scores highest after subtracting a similarity penalty
-  // against everything already picked. Similarity blends two signals:
-  //   (a) shared non-seed items
-  //   (b) closeness of non-seed dominant hues
-  // This makes the 5 results visibly different in color, not just different items.
+  // Greedy diversity selection with HARD uniqueness on top and pants.
+  // Across the 5 results, no non-seed top may repeat and no non-seed pants may
+  // repeat — even if that means returning fewer than 5 outfits when the
+  // wardrobe doesn't have enough variety. Within that hard constraint we
+  // still prefer color-different picks via a similarity penalty.
   const picked = [];
-  const remaining = candidates.slice();
+  const usedTopIds = new Set();
+  const usedPantsIds = new Set();
 
-  picked.push(remaining.shift());
+  const topOf = c => c.items.find(i => !seedIds.has(i.id) && TOP_CATEGORIES.includes(i.category));
+  const pantsOf = c => c.items.find(i => !seedIds.has(i.id) && i.category === 'pants');
 
-  while (picked.length < MAX_RESULTS && remaining.length) {
-    let bestIdx = 0;
+  const violatesUniqueness = c => {
+    const t = topOf(c);
+    if (t && usedTopIds.has(t.id)) return true;
+    const p = pantsOf(c);
+    if (p && usedPantsIds.has(p.id)) return true;
+    return false;
+  };
+
+  const commit = c => {
+    const t = topOf(c);
+    if (t) usedTopIds.add(t.id);
+    const p = pantsOf(c);
+    if (p) usedPantsIds.add(p.id);
+    picked.push(c);
+  };
+
+  // Seed the picks with the highest-scoring legal candidate.
+  for (let i = 0; i < candidates.length; i++) {
+    if (!violatesUniqueness(candidates[i])) {
+      commit(candidates[i]);
+      candidates.splice(i, 1);
+      break;
+    }
+  }
+  if (!picked.length) return [];
+
+  while (picked.length < MAX_RESULTS) {
+    let bestIdx = -1;
     let bestAdj = -Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const c = remaining[i];
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      if (violatesUniqueness(c)) continue;
       let maxSim = 0;
       for (const p of picked) {
         const sim = outfitSimilarity(c, p, seedIds);
         if (sim > maxSim) maxSim = sim;
       }
-      // Strong penalty for similarity — we'd rather take a slightly lower-scoring
-      // outfit than another near-duplicate.
       const adj = c.overallScore - 0.55 * maxSim;
       if (adj > bestAdj) { bestAdj = adj; bestIdx = i; }
     }
-    picked.push(remaining.splice(bestIdx, 1)[0]);
+    if (bestIdx === -1) break; // no more legal candidates — return what we have
+    commit(candidates[bestIdx]);
+    candidates.splice(bestIdx, 1);
   }
 
   // Strip helper field
